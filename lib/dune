@@ -1,0 +1,6 @@
+(library
+ (name order_book)
+ (public_name order-book)
+ (libraries core fixed-decimal hl-protocol)
+ (preprocess
+  (pps ppx_jane)))

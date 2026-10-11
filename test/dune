@@ -1,0 +1,8 @@
+(library
+ (name order_book_test)
+ (inline_tests
+  (flags
+   (:standard -source-tree-root .)))
+ (libraries core hl-protocol order-book)
+ (preprocess
+  (pps ppx_jane)))
