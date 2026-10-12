@@ -98,3 +98,26 @@ Apple M3 Max, default (non `-O3`) build:
 | sweep 10 levels, then re-add the 10 makers | 3.4 us | 1820 |
 | `l2 ~n_levels:10` | 211 ns | 656 |
 | `best_bid` | 9 ns | 8 |
+
+### Allocation
+
+`test/test_alloc.ml` prints minor-heap words per operation on the same book, so a change
+in allocation shows up as an expect-test diff. Caching the best level of each side (instead
+of calling `Map.max_elt`/`Map.min_elt`, which allocate a `Some (key, data)`) changed:
+
+| Operation | Before | After |
+| --- | ---: | ---: |
+| `best_bid` / `best_ask` | 5 | 2 |
+| `mid` | 12 | 2 |
+| `find` | 2 | 2 |
+| `l2 ~n_levels:10` | 653 | 653 |
+| match 1 fill (IOC) | 31 | 26 |
+| submit + cancel | 43 | 38 |
+
+The remaining 2 words of `best_bid` are the `Some`. A `local_` variant returning
+`Price.t option @ local` (built with `exclave_`) would avoid it, but `Price.t` is abstract
+and not declared immediate, so the price inside a local option is itself local and cannot
+be passed to `Price.to_units`, `Price.equal` or any other function taking a global
+argument. The variant was dropped; it becomes useful once `Fixed_decimal.S.t` is declared
+`immediate`. `l2` allocates its result lists and the `Sequence` machinery; it is not on
+the matching path.
