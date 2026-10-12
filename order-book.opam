@@ -13,6 +13,8 @@ depends: [
   "fixed-decimal"
   "exchange-core"
   "ppx_jane"
+  "core_bench" {with-test}
+  "core_unix" {with-test}
   "odoc" {with-doc}
 ]
 build: [

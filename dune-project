@@ -23,4 +23,6 @@
   core
   fixed-decimal
   exchange-core
-  ppx_jane))
+  ppx_jane
+  (core_bench :with-test)
+  (core_unix :with-test)))
