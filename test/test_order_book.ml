@@ -1,5 +1,5 @@
 open! Core
-open! Hl_protocol
+open! Exchange_core
 open Helpers
 
 let%expect_test "price-time priority: better price first, then oldest first" =
@@ -287,7 +287,7 @@ let%test_unit "a single taker sweeps 200k makers" =
       ~sz:(Size.of_int s)
       ~tif:Gtc
       ~time:oid
-      ~next_tid:(fun () -> oid)
+      ~next_tid:(fun () -> Trade_id.of_int oid)
       ()
   in
   for i = 1 to n do

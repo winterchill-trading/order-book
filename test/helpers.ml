@@ -1,17 +1,17 @@
 open! Core
-open! Hl_protocol
+open! Exchange_core
 
-let addr n = Address.of_string (sprintf "0x%040x" n)
+let addr n = Account.of_string (sprintf "0x%040x" n)
 let px = Price.of_string
 let sz = Size.of_string
-let btc = Coin.of_string "BTC"
-let owner_id a = Int.of_string ("0x" ^ String.drop_prefix (Address.to_string a) 2)
+let btc = Symbol.of_string "BTC"
+let owner_id a = Int.of_string ("0x" ^ String.drop_prefix (Account.to_string a) 2)
 
 let print_result (r : Order_book.Result.t) =
   let fills =
     List.map r.fills ~f:(fun (f : Order_book.Fill.t) ->
       [%sexp
-        { tid = (f.tid : int)
+        { tid = (f.tid : Trade_id.t)
         ; px = (f.px : Price.t)
         ; sz = (f.sz : Size.t)
         ; taker = ((Order_id.to_int_exn f.taker_oid, owner_id f.taker) : int * int)
@@ -48,7 +48,7 @@ module Book = struct
   let next_tid t () =
     let tid = t.next_tid in
     t.next_tid <- t.next_tid + 1;
-    tid
+    Trade_id.of_int tid
   ;;
 
   let limit ?(quiet = false) ?(tif = Tif.Gtc) t ~owner side p s =
@@ -93,7 +93,7 @@ module Book = struct
   let print_l2 ?(n_levels = 10) t =
     let bids, asks = Order_book.l2 t.book ~n_levels in
     let show levels =
-      List.map levels ~f:(fun (l : L2_book.Level.t) ->
+      List.map levels ~f:(fun (l : L2.Level.t) ->
         sprintf "%s x %s (%d)" (Price.to_string l.px) (Size.to_string l.sz) l.n)
     in
     print_s [%message "" ~bids:(show bids : string list) ~asks:(show asks : string list)]

@@ -3,6 +3,6 @@
  (inline_tests
   (flags
    (:standard -source-tree-root .)))
- (libraries core hl-protocol order-book)
+ (libraries core exchange-core order-book)
  (preprocess
   (pps ppx_jane)))
