@@ -58,6 +58,7 @@ let%test_unit "order book and naive matcher agree on random operation sequences"
   Quickcheck.test
     ~trials:1000
     ~sexp_of:[%sexp_of: Op.t list]
+    ~examples:Op.examples
     (Quickcheck.Generator.list_with_length n_oids Op.gen)
     ~f:run
 ;;

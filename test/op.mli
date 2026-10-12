@@ -21,3 +21,9 @@ type t =
 
 (** Owners 1-4, prices 95-105, sizes 1-5 (limit) or 1-8 (market). *)
 val gen : t Quickcheck.Generator.t
+
+(** Hand-picked sequences for edge cases (self-trade mid-sweep, ALO at the touch, market
+    orders on an empty book and beyond the slippage limit, cancelling a filled order, FIFO
+    after a partial fill, emptying the best level). Passed to properties as [~examples] so
+    they run on every test run. *)
+val examples : t list list

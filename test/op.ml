@@ -37,3 +37,25 @@ let gen =
     ; (2., Int.gen_incl 0 1000 >>| fun i -> Cancel i)
     ]
 ;;
+
+let limit ?(tif = Tif.Gtc) owner side px sz = Limit { owner; side; px; sz; tif }
+
+let examples =
+  [ (* Self-trade in the middle of a sweep: one fill, then the taker's own ask stops it. *)
+    [ limit 1 Sell 100 2; limit 2 Sell 101 2; limit 2 Buy 102 5 ]
+  ; (* ALO at the touch is rejected; one tick away it rests. *)
+    [ limit 1 Sell 100 1; limit ~tif:Alo 2 Buy 100 1; limit ~tif:Alo 2 Buy 99 1 ]
+  ; (* Market on an empty book, then a market order limited by the 3% slippage. *)
+    [ Market { owner = 1; side = Buy; sz = 3 }
+    ; limit 1 Sell 100 1
+    ; limit 1 Sell 104 1
+    ; Market { owner = 2; side = Buy; sz = 5 }
+    ]
+  ; (* Partial fill of a maker, then cancelling it twice. *)
+    [ limit 1 Sell 100 5; limit ~tif:Ioc 2 Buy 100 2; Cancel 0; Cancel 0 ]
+  ; (* FIFO within a level survives a partial fill of the first maker. *)
+    [ limit 1 Sell 100 3; limit 2 Sell 100 3; limit 3 Buy 100 4; limit 4 Buy 100 3 ]
+  ; (* An IOC empties the best level exactly, then the other side rests at that price. *)
+    [ limit 1 Buy 99 2; limit 1 Buy 98 2; limit ~tif:Ioc 2 Sell 99 2; limit 3 Sell 99 1 ]
+  ]
+;;

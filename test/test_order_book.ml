@@ -221,6 +221,7 @@ let%test_unit "random operation sequences preserve book invariants and conserve 
   Quickcheck.test
     ~trials:500
     ~sexp_of:[%sexp_of: Op.t list]
+    ~examples:Op.examples
     (Quickcheck.Generator.list_with_length 60 Op.gen)
     ~f:(fun ops ->
       let b = Book.create () in
