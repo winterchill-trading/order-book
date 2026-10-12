@@ -27,3 +27,7 @@ val gen : t Quickcheck.Generator.t
     after a partial fill, emptying the best level). Passed to properties as [~examples] so
     they run on every test run. *)
 val examples : t list list
+
+(** Decodes a byte string into operations, three bytes per operation (trailing bytes are
+    ignored). Every byte string decodes, so random strings make a fuzz input. *)
+val of_bytes : string -> t list

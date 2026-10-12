@@ -59,3 +59,22 @@ let examples =
     [ limit 1 Buy 99 2; limit 1 Buy 98 2; limit ~tif:Ioc 2 Sell 99 2; limit 3 Sell 99 1 ]
   ]
 ;;
+
+let of_bytes s =
+  let byte i = Char.to_int s.[i] in
+  List.init
+    (String.length s / 3)
+    ~f:(fun i ->
+      let b0 = byte (3 * i)
+      and b1 = byte ((3 * i) + 1)
+      and b2 = byte ((3 * i) + 2) in
+      let owner = 1 + (b0 / 9 % 4) in
+      let side = if b1 land 1 = 0 then Side.Buy else Sell in
+      let sz = 1 + (b2 % 8) in
+      match b0 % 9 with
+      | 6 -> Market { owner; side; sz }
+      | 7 | 8 -> Cancel b1
+      | _ ->
+        let tif = List.nth_exn Tif.all (b2 / 8 % List.length Tif.all) in
+        Limit { owner; side; px = 95 + (b1 / 2 % 11); sz; tif })
+;;
