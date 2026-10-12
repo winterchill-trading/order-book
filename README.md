@@ -77,3 +77,24 @@ market orders, cancel, L2 shape) and `Base_quickcheck` properties over random op
 sequences: books never cross, taker and maker filled sizes agree, remaining sizes stay
 positive and cancelling everything empties the book. A stress test sweeps 200k makers
 with one taker.
+
+## Benchmarks
+
+`bench/main.ml` runs [core_bench](https://github.com/janestreet/core_bench) on a
+1000-level book (500 bids, 500 asks, one maker per level):
+
+```sh
+dune exec ./bench/main.exe -- -quota 2 -ascii
+```
+
+Each case leaves the book as it found it, so some cases measure a pair of operations.
+Apple M3 Max, default (non `-O3`) build:
+
+| Case | Time/run | Minor words/run |
+| --- | ---: | ---: |
+| submit + cancel, existing level | 222 ns | 46 |
+| submit + cancel, new level | 332 ns | 187 |
+| match 1 fill (IOC against a deep maker) | 77 ns | 32 |
+| sweep 10 levels, then re-add the 10 makers | 3.4 us | 1820 |
+| `l2 ~n_levels:10` | 211 ns | 656 |
+| `best_bid` | 9 ns | 8 |
