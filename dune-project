@@ -22,5 +22,5 @@
   dune
   core
   fixed-decimal
-  hl-protocol
+  exchange-core
   ppx_jane))

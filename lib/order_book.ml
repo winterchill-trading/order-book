@@ -1,18 +1,18 @@
 open! Core
-open! Hl_protocol
+open! Exchange_core
 module Fill = Fill
 
 module Resting_order = struct
   type t =
     { oid : Order_id.t
-    ; owner : Address.t
+    ; owner : Account.t
     ; side : Side.t
     ; px : Price.t
     ; mutable remaining : Size.t
     ; orig_sz : Size.t
     ; timestamp : int
     ; reduce_only : bool
-    ; cloid : Cloid.t option
+    ; cloid : Client_order_id.t option
     }
   [@@deriving sexp_of]
 end
@@ -52,22 +52,22 @@ module Level = struct
 end
 
 type t =
-  { coin : Coin.t
+  { symbol : Symbol.t
   ; mutable bids : Level.t Price.Map.t
   ; mutable asks : Level.t Price.Map.t
   ; index : Resting_order.t Order_id.Table.t
   }
 [@@deriving sexp_of]
 
-let create coin =
-  { coin
+let create symbol =
+  { symbol
   ; bids = Price.Map.empty
   ; asks = Price.Map.empty
   ; index = Order_id.Table.create ()
   }
 ;;
 
-let coin t = t.coin
+let symbol t = t.symbol
 
 let side_levels t (side : Side.t) =
   match side with
@@ -132,12 +132,12 @@ let remove_level_if_empty t (side : Side.t) px (level : Level.t) =
    heap values which may be stored into the (heap-allocated) fills. *)
 type taker =
   { global_ oid : Order_id.t
-  ; global_ owner : Address.t
+  ; global_ owner : Account.t
   ; side : Side.t
   ; global_ limit : Price.t
-  ; global_ cloid : Cloid.t option
+  ; global_ cloid : Client_order_id.t option
   ; time : int
-  ; global_ next_tid : unit -> int
+  ; global_ next_tid : unit -> Trade_id.t
   }
 
 type stop =
@@ -172,7 +172,7 @@ let rec sweep t (local_ (taker : taker)) remaining fills =
       exclave_ { unfilled = remaining; rev_fills = fills; stop = Exhausted }
     | Some (px, level) ->
       let maker = Queue.peek_exn level.orders in
-      if Address.equal maker.owner taker.owner
+      if Account.equal maker.owner taker.owner
       then exclave_ { unfilled = remaining; rev_fills = fills; stop = Self_trade }
       else (
         let sz = Size.min remaining maker.remaining in
@@ -185,7 +185,7 @@ let rec sweep t (local_ (taker : taker)) remaining fills =
           remove_level_if_empty t opposite px level);
         let fill : Fill.t =
           { tid = taker.next_tid ()
-          ; coin = t.coin
+          ; symbol = t.symbol
           ; px
           ; sz
           ; taker_side = taker.side
@@ -343,7 +343,7 @@ let l2 t ~n_levels =
     levels_best_first t side
     |> Fn.flip Sequence.take n_levels
     |> Sequence.map ~f:(fun (px, (level : Level.t)) ->
-      { L2_book.Level.px; sz = level.total; n = Queue.length level.orders })
+      { L2.Level.px; sz = level.total; n = Queue.length level.orders })
     |> Sequence.to_list
   in
   side_l2 Buy, side_l2 Sell

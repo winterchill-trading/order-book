@@ -1,4 +1,4 @@
-(** A single coin's limit order book with price-time priority.
+(** A single instrument's limit order book with price-time priority.
 
     Each side maps prices to levels; a level is a FIFO queue of resting orders. Incoming
     orders match against the opposite side best price first and, within a price, oldest
@@ -12,20 +12,20 @@
     caller. *)
 
 open! Core
-open! Hl_protocol
+open! Exchange_core
 module Fill = Fill
 
 module Resting_order : sig
   type t = private
     { oid : Order_id.t
-    ; owner : Address.t
+    ; owner : Account.t
     ; side : Side.t
     ; px : Price.t
     ; mutable remaining : Size.t
     ; orig_sz : Size.t
     ; timestamp : int (** nanoseconds at which the order was accepted *)
     ; reduce_only : bool
-    ; cloid : Cloid.t option
+    ; cloid : Client_order_id.t option
     }
   [@@deriving sexp_of]
 end
@@ -58,8 +58,8 @@ end
 
 type t [@@deriving sexp_of]
 
-val create : Coin.t -> t
-val coin : t -> Coin.t
+val create : Symbol.t -> t
+val symbol : t -> Symbol.t
 
 (** Submits a limit order. [Gtc] rests any remainder, [Ioc] cancels it, [Alo] is rejected
     with [Would_cross] if it would match immediately and otherwise rests in full.
@@ -68,15 +68,15 @@ val coin : t -> Coin.t
 val add_limit
   :  t
   -> oid:Order_id.t
-  -> owner:Address.t
+  -> owner:Account.t
   -> side:Side.t
   -> px:Price.t
   -> sz:Size.t
   -> tif:Tif.t
   -> ?reduce_only:bool
-  -> ?cloid:Cloid.t
+  -> ?cloid:Client_order_id.t
   -> time:int
-  -> next_tid:(unit -> int)
+  -> next_tid:(unit -> Trade_id.t)
   -> unit
   -> Result.t
 
@@ -89,14 +89,14 @@ val market_limit_px : t -> side:Side.t -> slippage_bps:int -> Price.t option
 val market
   :  t
   -> oid:Order_id.t
-  -> owner:Address.t
+  -> owner:Account.t
   -> side:Side.t
   -> sz:Size.t
   -> slippage_bps:int
   -> ?reduce_only:bool
-  -> ?cloid:Cloid.t
+  -> ?cloid:Client_order_id.t
   -> time:int
-  -> next_tid:(unit -> int)
+  -> next_tid:(unit -> Trade_id.t)
   -> unit
   -> Result.t
 
@@ -111,7 +111,7 @@ val best_ask : t -> Price.t option
 val mid : t -> Price.t option
 
 (** Aggregated levels, best first, at most [n_levels] per side: [(bids, asks)]. *)
-val l2 : t -> n_levels:int -> L2_book.Level.t list * L2_book.Level.t list
+val l2 : t -> n_levels:int -> L2.Level.t list * L2.Level.t list
 
 (** Visits every resting order: bids from best to worst, then asks from best to worst, in
     time priority within a level. [f] must not modify the book. *)
