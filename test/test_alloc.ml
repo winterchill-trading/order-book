@@ -79,12 +79,12 @@ let%expect_test "minor words per operation" =
   Order_book.invariant book;
   [%expect
     {|
-    best_bid                5
-    best_ask                5
-    mid                    12
+    best_bid                2
+    best_ask                2
+    mid                     2
     find                    2
     l2 10 levels          653
-    match 1 fill (IOC)     31
-    submit + cancel        43
+    match 1 fill (IOC)     26
+    submit + cancel        38
     |}]
 ;;

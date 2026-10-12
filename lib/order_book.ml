@@ -45,7 +45,8 @@ end
 
 module Level = struct
   type t =
-    { mutable total : Size.t
+    { px : Price.t
+    ; mutable total : Size.t
     ; orders : Resting_order.t Queue.t
     }
   [@@deriving sexp_of]
@@ -56,6 +57,11 @@ type t =
   ; mutable bids : Level.t Price.Map.t
   ; mutable asks : Level.t Price.Map.t
   ; index : Resting_order.t Order_id.Table.t
+  ; (* The best level of each side, cached so that queries and the matching loop do not
+       allocate the [(key, data) option] that [Map.max_elt] and [Map.min_elt] return.
+       Updated when a better level is created or the best level is removed. *)
+    mutable top_bid : Level.t option [@sexp_drop_if fun _ -> true]
+  ; mutable top_ask : Level.t option [@sexp_drop_if fun _ -> true]
   }
 [@@deriving sexp_of]
 
@@ -64,6 +70,8 @@ let create symbol =
   ; bids = Price.Map.empty
   ; asks = Price.Map.empty
   ; index = Order_id.Table.create ()
+  ; top_bid = None
+  ; top_ask = None
   }
 ;;
 
@@ -81,19 +89,37 @@ let set_side_levels t (side : Side.t) levels =
   | Sell -> t.asks <- levels
 ;;
 
-(* Best level of a side: highest bid, lowest ask. *)
-let best_level t (side : Side.t) =
+let top t (side : Side.t) =
   match side with
-  | Buy -> Map.max_elt t.bids
-  | Sell -> Map.min_elt t.asks
+  | Buy -> t.top_bid
+  | Sell -> t.top_ask
 ;;
 
-let best_bid t = Map.max_elt t.bids |> Option.map ~f:fst
-let best_ask t = Map.min_elt t.asks |> Option.map ~f:fst
+let set_top t (side : Side.t) level =
+  match side with
+  | Buy -> t.top_bid <- level
+  | Sell -> t.top_ask <- level
+;;
+
+(* Whether [px] is a better price than [than] for resting orders on [side]. *)
+let better (side : Side.t) px ~than =
+  match side with
+  | Buy -> Price.( > ) px than
+  | Sell -> Price.( < ) px than
+;;
+
+(* Best level of a side: highest bid, lowest ask. *)
+let best_level = top
+let best_bid t = Option.map t.top_bid ~f:(fun (l : Level.t) -> l.px)
+let best_ask t = Option.map t.top_ask ~f:(fun (l : Level.t) -> l.px)
+
+let mid_px (b : Level.t) (a : Level.t) =
+  Price.of_units ((Price.to_units b.px + Price.to_units a.px) / 2)
+;;
 
 let mid t =
-  match best_bid t, best_ask t with
-  | Some b, Some a -> Some (Price.of_units ((Price.to_units b + Price.to_units a) / 2))
+  match t.top_bid, t.top_ask with
+  | Some b, Some a -> Some (mid_px b a)
   | _ -> None
 ;;
 
@@ -110,8 +136,11 @@ let rest t (order : Resting_order.t) =
     match Map.find levels order.px with
     | Some level -> level
     | None ->
-      let level = { Level.total = Size.zero; orders = Queue.create () } in
+      let level = { Level.px = order.px; total = Size.zero; orders = Queue.create () } in
       set_side_levels t order.side (Map.set levels ~key:order.px ~data:level);
+      (match top t order.side with
+       | Some (best : Level.t) when not (better order.side order.px ~than:best.px) -> ()
+       | _ -> set_top t order.side (Some level));
       level
   in
   Queue.enqueue level.orders order;
@@ -121,7 +150,18 @@ let rest t (order : Resting_order.t) =
 
 let remove_level_if_empty t (side : Side.t) px (level : Level.t) =
   if Queue.is_empty level.orders
-  then set_side_levels t side (Map.remove (side_levels t side) px)
+  then (
+    let levels = Map.remove (side_levels t side) px in
+    set_side_levels t side levels;
+    match top t side with
+    | Some best when phys_equal best level ->
+      let next =
+        match side with
+        | Buy -> Map.max_elt levels
+        | Sell -> Map.min_elt levels
+      in
+      set_top t side (Option.map next ~f:snd)
+    | _ -> ())
 ;;
 
 (* Per-call context of the incoming order, threaded through the matching loop.
@@ -168,9 +208,10 @@ let rec sweep t (local_ (taker : taker)) remaining fills =
     let opposite = Side.flip taker.side in
     match best_level t opposite with
     | None -> exclave_ { unfilled = remaining; rev_fills = fills; stop = Exhausted }
-    | Some (px, _) when not (crosses taker.side ~limit:taker.limit px) ->
+    | Some level when not (crosses taker.side ~limit:taker.limit level.px) ->
       exclave_ { unfilled = remaining; rev_fills = fills; stop = Exhausted }
-    | Some (px, level) ->
+    | Some level ->
+      let px = level.px in
       let maker = Queue.peek_exn level.orders in
       if Account.equal maker.owner taker.owner
       then exclave_ { unfilled = remaining; rev_fills = fills; stop = Self_trade }
@@ -261,7 +302,7 @@ let add_limit
     let would_cross =
       match best_level t (Side.flip side) with
       | None -> false
-      | Some (best, _) -> crosses side ~limit:px best
+      | Some best -> crosses side ~limit:px best.px
     in
     if would_cross
     then { fills = []; status = Would_cross; filled = Size.zero; remaining = sz }
@@ -285,8 +326,8 @@ let add_limit
 
 let market_limit_px t ~side ~slippage_bps =
   best_level t (Side.flip side)
-  |> Option.map ~f:(fun (best, _) ->
-    let units = Price.to_units best in
+  |> Option.map ~f:(fun (best : Level.t) ->
+    let units = Price.to_units best.px in
     (* One basis point is [10^4] units of [10^-8]. *)
     let delta = Fixed_decimal.mul_units units (slippage_bps * 10_000) in
     match (side : Side.t) with
@@ -389,6 +430,14 @@ let invariant t =
   in
   check_side Buy t.bids;
   check_side Sell t.asks;
+  let check_top side top expected =
+    match top, expected with
+    | None, None -> ()
+    | Some (top : Level.t), Some (_, expected) when phys_equal top expected -> ()
+    | _ -> raise_s [%message "stale best level cache" (side : Side.t)]
+  in
+  check_top Buy t.top_bid (Map.max_elt t.bids);
+  check_top Sell t.top_ask (Map.min_elt t.asks);
   if !count <> Hashtbl.length t.index
   then raise_s [%message "index has stale entries" (!count : int)];
   match best_bid t, best_ask t with
