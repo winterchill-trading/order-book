@@ -15,3 +15,5 @@ jobs:
             exchange-core https://github.com/winterchill-trading/exchange-core.git
       - run: opam exec -- dune build
       - run: opam exec -- dune test
+  obj-magic:
+    uses: winterchill-trading/infra/.github/workflows/obj-magic.yml@main
