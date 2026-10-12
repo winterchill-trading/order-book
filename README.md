@@ -99,6 +99,36 @@ Apple M3 Max, default (non `-O3`) build:
 | `l2 ~n_levels:10` | 211 ns | 656 |
 | `best_bid` | 9 ns | 8 |
 
+These are the numbers before the best-level cache described under Allocation; with it,
+`best_bid` takes 4 ns and 5 words and a single-fill match 27 words.
+
+### Release build and `-O3`
+
+The ox compiler is flambda2. Three builds of the benchmark, each run twice with
+`-quota 3` (best of the two runs, same machine, after the best-level cache):
+
+```sh
+dune build --profile release ./bench/main.exe                        # release
+OCAMLPARAM='_,O3=1' dune build --profile release ./bench/main.exe    # -O3 everywhere
+```
+
+| Case | dev | release | release, `-O3` |
+| --- | ---: | ---: | ---: |
+| submit + cancel, existing level | 223 ns | 195 ns | 158 ns |
+| submit + cancel, new level | 329 ns | 321 ns | 288 ns |
+| match 1 fill (IOC) | 74 ns, 27 w | 66 ns, 27 w | 37 ns, 22 w |
+| sweep 10 levels, then re-add | 3.35 us | 3.29 us | 2.74 us |
+| `l2 ~n_levels:10` | 209 ns | 208 ns | 198 ns |
+| `best_bid` | 3.6 ns, 5 w | 3.4 ns, 5 w | 2.5 ns, 3 w |
+
+`-O3` roughly halves the cost of a single fill and cuts its allocation, because
+`Price`, `Size` and `Account` comparisons from `exchange-core` and `fixed-decimal` get
+inlined into the matching loop. The gain needs `-O3` on those libraries too:
+compiling only this repository with `-O3` (an `env` stanza for the release profile)
+brought the single fill from 66 ns to 62 ns. `OCAMLPARAM` covers every library built
+from source in the workspace, but not opam-installed ones (Core), so binaries that want
+the speed-up should set it when building the whole stack.
+
 ### Allocation
 
 `test/test_alloc.ml` prints minor-heap words per operation on the same book, so a change
