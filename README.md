@@ -70,6 +70,23 @@ per-order temporaries:
 - `Order_book.iter` takes its callback `@ local`, and Base's `Map` and `Queue` iterators
   accept local closures, so the wrappers stay on the stack.
 
+### Unboxed fields and `or_null` (analysis)
+
+Candidates on the hot path, not yet changed. Prices, sizes and ids are already tagged
+`int`s at run time, so most gains come from removing `Some` boxes and pointer hops:
+
+| Record / field | Today | Candidate | Gain |
+| --- | --- | --- | --- |
+| `t.top_bid`, `t.top_ask` | `Level.t option` | `Level.t or_null` | no `Some` allocation when the best level changes, one load less per matching step |
+| `Fill.t.taker_cloid`, `maker_cloid` | `Client_order_id.t option` | `or_null` | 2 words less per fill when a client id is set |
+| `Resting_order.t.cloid` | `Client_order_id.t option` | `or_null` | 2 words less per resting order with a client id |
+| `best_bid`, `best_ask`, `mid` results | `Price.t option` | `Price.t or_null` | no allocation at all; changes the public interface |
+| `Level.t.orders` | pointer to a `Queue.t` record, which points to its array | queue fields inlined into `Level.t` (own ring buffer, or an unboxed record field) | one pointer hop per maker visited |
+| `Fixed_decimal.S.t` (`Price`, `Size`) | abstract type, layout `value` | declared `immediate` | lets local values cross modes, so `exclave_` query variants become usable (see Allocation), and allows `int`-like unboxed storage |
+
+`Fill.t` itself has to stay a heap record: fills are returned to the caller in a list.
+The per-call `taker` and `swept` records are already stack-allocated.
+
 ## Tests
 
 `dune test` runs expect tests (priority, partial fills, TIF semantics, self-trade,
@@ -77,6 +94,15 @@ market orders, cancel, L2 shape) and `Base_quickcheck` properties over random op
 sequences: books never cross, taker and maker filled sizes agree, remaining sizes stay
 positive and cancelling everything empties the book. A stress test sweeps 200k makers
 with one taker.
+
+`test/test_bisim.ml` checks the book by bisimulation against `test/naive_book.ml`, a
+reference matcher that keeps resting orders in one list and re-sorts it on every step:
+after each random operation both must report the same fills, status, remainder, cancel
+result and full L2. A second property decodes random byte strings into operations
+(`Op.of_bytes`) as a fuzz input. Hand-picked edge cases (self-trade mid-sweep, ALO at
+the touch, market orders on an empty book or beyond the slippage limit, cancelling a
+filled order, FIFO after a partial fill) are pinned with `~examples`, so they run on
+every test run. `test/test_alloc.ml` prints minor words per operation.
 
 ## Benchmarks
 
