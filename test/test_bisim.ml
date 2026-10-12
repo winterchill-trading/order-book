@@ -62,3 +62,23 @@ let%test_unit "order book and naive matcher agree on random operation sequences"
     (Quickcheck.Generator.list_with_length n_oids Op.gen)
     ~f:run
 ;;
+
+let%test_unit "fuzz: random byte strings decoded into operations" =
+  Quickcheck.test
+    ~trials:1000
+    ~sexp_of:[%sexp_of: string]
+    ~examples:[ ""; "\000\000\000"; String.make 192 '\255'; String.make 192 '\007' ]
+    (let open Quickcheck.Generator.Let_syntax in
+     let%bind len = Int.gen_incl 0 (3 * n_oids) in
+     String.gen_with_length len Char.quickcheck_generator)
+    ~f:(fun s -> run (Op.of_bytes s))
+;;
+
+let%expect_test "byte decoding" =
+  print_s [%sexp (Op.of_bytes "\000\021\009\006\001\002\007\005\000\010" : Op.t list)];
+  [%expect
+    {|
+    ((Limit (owner 1) (side Sell) (px 105) (sz 2) (tif Ioc))
+     (Market (owner 1) (side Sell) (sz 3)) (Cancel 5))
+    |}]
+;;
