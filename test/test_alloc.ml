@@ -52,6 +52,11 @@ let words_per_run f =
   Float.iround_nearest_exn (Float.of_int (Gc.minor_words () - before) /. Float.of_int runs)
 ;;
 
+let or_null_ignore : Price.t or_null -> unit = function
+  | Null -> ()
+  | This _ -> ()
+;;
+
 let%expect_test "minor words per operation" =
   let book = make_book () in
   let resting_oid = Order_id.of_int 3 in
@@ -59,6 +64,9 @@ let%expect_test "minor words per operation" =
     [ ("best_bid", fun () -> ignore (Order_book.best_bid book : Price.t option))
     ; ("best_ask", fun () -> ignore (Order_book.best_ask book : Price.t option))
     ; ("mid", fun () -> ignore (Order_book.mid book : Price.t option))
+    ; ("best_bid_or_null", fun () -> or_null_ignore (Order_book.best_bid_or_null book))
+    ; ("best_ask_or_null", fun () -> or_null_ignore (Order_book.best_ask_or_null book))
+    ; ("mid_or_null", fun () -> or_null_ignore (Order_book.mid_or_null book))
     ; ( "find"
       , fun () ->
           ignore (Order_book.find book resting_oid : Order_book.Resting_order.t option) )
@@ -82,6 +90,9 @@ let%expect_test "minor words per operation" =
     best_bid                2
     best_ask                2
     mid                     2
+    best_bid_or_null        0
+    best_ask_or_null        0
+    mid_or_null             0
     find                    2
     l2 10 levels          653
     match 1 fill (IOC)     26
