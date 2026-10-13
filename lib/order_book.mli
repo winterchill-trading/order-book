@@ -110,6 +110,17 @@ val best_ask : t -> Price.t option
 (** Midpoint of the best bid and ask, when both exist (rounded toward zero). *)
 val mid : t -> Price.t option
 
+(** [best_bid], [best_ask] and [mid] without allocating: [Null] where those return
+    [None]. *)
+
+val best_bid_or_null : t -> Price.t or_null [@@zero_alloc]
+
+val best_ask_or_null : t -> Price.t or_null [@@zero_alloc]
+
+(** Not annotated [@@zero_alloc]: the check cannot see through [Price.of_units] in
+    [fixed-decimal]; [test/test_alloc.ml] pins it at 0 words. *)
+val mid_or_null : t -> Price.t or_null
+
 (** Aggregated levels, best first, at most [n_levels] per side: [(bids, asks)]. *)
 val l2 : t -> n_levels:int -> L2.Level.t list * L2.Level.t list
 

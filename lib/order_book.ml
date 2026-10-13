@@ -123,6 +123,24 @@ let mid t =
   | _ -> None
 ;;
 
+let best_bid_or_null t : Price.t or_null =
+  match t.top_bid with
+  | Some l -> This l.px
+  | None -> Null
+;;
+
+let best_ask_or_null t : Price.t or_null =
+  match t.top_ask with
+  | Some l -> This l.px
+  | None -> Null
+;;
+
+let mid_or_null t : Price.t or_null =
+  match t.top_bid, t.top_ask with
+  | Some b, Some a -> This (mid_px b a)
+  | _ -> Null
+;;
+
 (* Whether a taker on [side] with [limit] would trade against a maker at [px]. *)
 let crosses (side : Side.t) ~limit px =
   match side with
@@ -440,6 +458,15 @@ let invariant t =
   check_top Sell t.top_ask (Map.min_elt t.asks);
   if !count <> Hashtbl.length t.index
   then raise_s [%message "index has stale entries" (!count : int)];
+  let check_or_null name (opt : Price.t option) (n : Price.t or_null) =
+    match opt, n with
+    | None, Null -> ()
+    | Some a, This b when Price.equal a b -> ()
+    | _ -> raise_s [%message "or_null query disagrees with option query" (name : string)]
+  in
+  check_or_null "best_bid" (best_bid t) (best_bid_or_null t);
+  check_or_null "best_ask" (best_ask t) (best_ask_or_null t);
+  check_or_null "mid" (mid t) (mid_or_null t);
   match best_bid t, best_ask t with
   | Some b, Some a when Price.( >= ) b a ->
     raise_s [%message "crossed book" (b : Price.t) (a : Price.t)]
