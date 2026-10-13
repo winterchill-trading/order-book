@@ -110,7 +110,10 @@ module Level = struct
 
   let sexp_of_t t =
     [%sexp
-      { px : Price.t = t.px; total : Size.t = t.total; orders : Resting_order.t list = to_list t }]
+      { px : Price.t = t.px
+      ; total : Size.t = t.total
+      ; orders : Resting_order.t list = to_list t
+      }]
   ;;
 
   let sexp_of_node node = Resting_order.sexp_of_t node.order

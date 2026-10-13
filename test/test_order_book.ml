@@ -153,7 +153,8 @@ let%expect_test "cancel at the head, middle and tail of a level keeps time prior
   Book.print_l2 b;
   [%expect {| ((bids ()) (asks ("100 x 2 (2)"))) |}];
   ignore (Book.limit ~tif:Ioc b ~owner:9 Buy "100" "3");
-  [%expect {|
+  [%expect
+    {|
     ((status (Cancelled Ioc_unfilled)) (filled 2) (remaining 1)
      (fills
       (((tid 1) (px 100) (sz 1) (taker (6 9)) (maker (3 3)))

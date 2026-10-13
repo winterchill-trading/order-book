@@ -38,8 +38,8 @@ let make_book () =
     let sz = if i = 0 then 1_000_000_000 else 10 in
     ignore (add book Sell (10_001 + i) sz : Order_book.Result.t)
   done;
-  (* The bid level at 9_900 holds 1000 orders, so cancelling the newest there would cost
-     a pass over the level if removal were linear. *)
+  (* The bid level at 9_900 holds 1000 orders, so cancelling the newest there would cost a
+     pass over the level if removal were linear. *)
   for _ = 2 to 1_000 do
     ignore (add book Buy 9_900 10 : Order_book.Result.t)
   done;
