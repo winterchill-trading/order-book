@@ -211,7 +211,7 @@ words of harness per case):
 | match 1 fill (IOC) | 26 | 26 |
 
 Time per call for the cancel behind 1000 orders, best of two runs per build on an Apple
-M3 Max: 24.8 us to 0.26 us at best, and 25 to 106 us before against 0.32 to 0.86 us
+M3 Max: 24.8 us to 0.26 us at best, and 25 to 161 us before against 0.26 to 1.4 us
 after in every dev, release and `-O3` run. The other cases measured within noise of the
 earlier tables: the machine was shared with heavy parallel builds during the run, so
 sub-microsecond timings from it are not reported. CI runs on amd64; these numbers are
