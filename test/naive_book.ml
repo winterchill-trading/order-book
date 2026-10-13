@@ -11,11 +11,12 @@ type order =
   }
 
 type t =
-  { mutable orders : order list
+  { stp : Order_book.Stp.t
+  ; mutable orders : order list
   ; mutable seq : int
   }
 
-let create () = { orders = []; seq = 0 }
+let create ?(stp = Order_book.Stp.default) () = { stp; orders = []; seq = 0 }
 
 module Fill = struct
   type t =
@@ -31,6 +32,7 @@ module Outcome = struct
     { fills : Fill.t list
     ; status : Order_book.Status.t
     ; remaining : Size.t
+    ; expired : Order_id.t list
     }
   [@@deriving sexp_of, compare, equal]
 end
@@ -69,15 +71,29 @@ let rest t ~oid ~owner ~side ~px ~remaining =
   t.orders <- t.orders @ [ { oid; owner; side; px; remaining; seq = t.seq } ]
 ;;
 
-(* Matches one maker at a time against the current best, re-reading the book each step. *)
-let rec sweep t ~owner ~side ~limit remaining fills =
+let remove t oid =
+  t.orders <- List.filter t.orders ~f:(fun o -> not (Order_id.equal o.oid oid))
+;;
+
+(* Matches one maker at a time against the current best, re-reading the book each step. An
+   own maker is handled by the policy: stop, or drop it and continue, or both. *)
+let rec sweep t ~owner ~side ~limit remaining fills expired =
+  let finish stop = remaining, List.rev fills, List.rev expired, stop in
   if Size.is_zero remaining
-  then remaining, List.rev fills, `Done
+  then finish `Done
   else (
     match side_orders t (Side.flip side) with
     | best :: _ when crosses side ~limit best.px ->
       if Account.equal best.owner owner
-      then remaining, List.rev fills, `Self_trade
+      then (
+        match t.stp with
+        | Cancel_taker -> finish `Self_trade
+        | Expire_maker ->
+          remove t best.oid;
+          sweep t ~owner ~side ~limit remaining fills (best.oid :: expired)
+        | Cancel_both ->
+          remove t best.oid;
+          remaining, List.rev fills, List.rev (best.oid :: expired), `Self_trade)
       else (
         let sz = Size.min remaining best.remaining in
         replace t { best with remaining = Size.( - ) best.remaining sz };
@@ -87,12 +103,13 @@ let rec sweep t ~owner ~side ~limit remaining fills =
           ~side
           ~limit
           (Size.( - ) remaining sz)
-          ({ Fill.maker_oid = best.oid; px = best.px; sz } :: fills))
-    | _ -> remaining, List.rev fills, `Exhausted)
+          ({ Fill.maker_oid = best.oid; px = best.px; sz } :: fills)
+          expired)
+    | _ -> finish `Exhausted)
 ;;
 
 let execute t ~oid ~owner ~side ~limit ~sz ~(tif : Tif.t) : Outcome.t =
-  let remaining, fills, stop = sweep t ~owner ~side ~limit sz [] in
+  let remaining, fills, expired, stop = sweep t ~owner ~side ~limit sz [] [] in
   let status : Order_book.Status.t =
     match stop, tif with
     | `Done, _ -> Filled
@@ -102,7 +119,7 @@ let execute t ~oid ~owner ~side ~limit ~sz ~(tif : Tif.t) : Outcome.t =
       rest t ~oid ~owner ~side ~px:limit ~remaining;
       Resting
   in
-  { fills; status; remaining }
+  { fills; status; remaining; expired }
 ;;
 
 let add_limit t ~oid ~owner ~side ~px ~sz ~(tif : Tif.t) : Outcome.t =
@@ -114,16 +131,16 @@ let add_limit t ~oid ~owner ~side ~px ~sz ~(tif : Tif.t) : Outcome.t =
         ~f:(fun o -> crosses side ~limit:px o.px)
     in
     if would_cross
-    then { fills = []; status = Would_cross; remaining = sz }
+    then { fills = []; status = Would_cross; remaining = sz; expired = [] }
     else (
       rest t ~oid ~owner ~side ~px ~remaining:sz;
-      { fills = []; status = Resting; remaining = sz })
+      { fills = []; status = Resting; remaining = sz; expired = [] })
   | Gtc | Ioc -> execute t ~oid ~owner ~side ~limit:px ~sz ~tif
 ;;
 
 let market t ~oid ~owner ~side ~sz ~slippage_bps : Outcome.t =
   match side_orders t (Side.flip side) with
-  | [] -> { fills = []; status = Cancelled Ioc_unfilled; remaining = sz }
+  | [] -> { fills = []; status = Cancelled Ioc_unfilled; remaining = sz; expired = [] }
   | best :: _ ->
     let units = Price.to_units best.px in
     let delta = units * slippage_bps / 10_000 in
@@ -137,7 +154,7 @@ let market t ~oid ~owner ~side ~sz ~slippage_bps : Outcome.t =
 
 let cancel t oid =
   let present = List.exists t.orders ~f:(fun o -> Order_id.equal o.oid oid) in
-  t.orders <- List.filter t.orders ~f:(fun o -> not (Order_id.equal o.oid oid));
+  remove t oid;
   present
 ;;
 

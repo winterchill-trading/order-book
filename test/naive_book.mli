@@ -6,7 +6,8 @@ open! Exchange_core
 
 type t
 
-val create : unit -> t
+(** [stp] defaults to [Order_book.Stp.default]. *)
+val create : ?stp:Order_book.Stp.t -> unit -> t
 
 (** A fill as the model sees it: maker oid, price, size. *)
 module Fill : sig
@@ -23,6 +24,7 @@ module Outcome : sig
     { fills : Fill.t list
     ; status : Order_book.Status.t
     ; remaining : Size.t
+    ; expired : Order_id.t list (** own makers removed by self-trade prevention *)
     }
   [@@deriving sexp_of, compare, equal]
 end
