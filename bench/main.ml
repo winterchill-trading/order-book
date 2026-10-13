@@ -103,6 +103,14 @@ let best_bid book () = ignore (Order_book.best_bid book : Price.t option)
 let best_ask book () = ignore (Order_book.best_ask book : Price.t option)
 let mid book () = ignore (Order_book.mid book : Price.t option)
 
+let or_null_ignore : Price.t or_null -> unit = function
+  | Null -> ()
+  | This _ -> ()
+;;
+
+let best_bid_or_null book () = or_null_ignore (Order_book.best_bid_or_null book)
+let mid_or_null book () = or_null_ignore (Order_book.mid_or_null book)
+
 let () =
   let book = make_book () in
   Command_unix.run
@@ -120,5 +128,7 @@ let () =
        ; Bench.Test.create ~name:"best_bid" (best_bid book)
        ; Bench.Test.create ~name:"best_ask" (best_ask book)
        ; Bench.Test.create ~name:"mid" (mid book)
+       ; Bench.Test.create ~name:"best_bid_or_null" (best_bid_or_null book)
+       ; Bench.Test.create ~name:"mid_or_null" (mid_or_null book)
        ])
 ;;
