@@ -5,8 +5,8 @@ open Helpers
 (* Minor-heap words allocated per operation on a 1000-level book (500 bids, 500 asks, one
    maker per level, a deep best ask). Each case leaves the book unchanged so it can be
    repeated. The numbers are what the compiler produces today; a change here is a change
-   in allocation behaviour. The single fill went from 26 to 27 words when [Result.t] gained
-   [expired_makers] (one more field; the empty list itself is an immediate). *)
+   in allocation behaviour. The single fill went from 26 to 27 words when [Result.t]
+   gained [expired_makers] (one more field; the empty list itself is an immediate). *)
 
 let maker = addr 1
 let taker = addr 2
@@ -110,4 +110,18 @@ let%expect_test "minor words per operation" =
     submit + cancel        37
     submit + cancel deep   37
     |}]
+;;
+
+let%expect_test "minor words per self-trade expiry" =
+  (* An Expire_maker book with one bid. Each run rests an own ask, then an own IOC buy
+     expires it and finds nothing else to match, leaving the book as it was. *)
+  let book = Order_book.create ~stp:Expire_maker btc in
+  ignore (add book Buy 99 1 : Order_book.Result.t);
+  let expire () =
+    ignore (add book Sell 100 1 : Order_book.Result.t);
+    ignore (add book ~tif:Ioc Buy 100 1 : Order_book.Result.t)
+  in
+  printf "%-20s %4d\n" "rest + expire" (words_per_run expire);
+  Order_book.invariant book;
+  [%expect {| rest + expire          58 |}]
 ;;
