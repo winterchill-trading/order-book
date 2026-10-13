@@ -38,6 +38,11 @@ let make_book () =
     let sz = if i = 0 then 1_000_000_000 else 10 in
     ignore (add book Sell (10_001 + i) sz : Order_book.Result.t)
   done;
+  (* The bid level at 9_900 holds 1000 orders, so cancelling the newest there would cost
+     a pass over the level if removal were linear. *)
+  for _ = 2 to 1_000 do
+    ignore (add book Buy 9_900 10 : Order_book.Result.t)
+  done;
   book
 ;;
 
@@ -81,6 +86,11 @@ let%expect_test "minor words per operation" =
           let oid = Order_id.of_int (!next_oid + 1) in
           ignore (add book Buy 9_750 1 : Order_book.Result.t);
           ignore (Order_book.cancel book oid : Order_book.Resting_order.t option) )
+    ; ( "submit + cancel deep"
+      , fun () ->
+          let oid = Order_id.of_int (!next_oid + 1) in
+          ignore (add book Buy 9_900 1 : Order_book.Result.t);
+          ignore (Order_book.cancel book oid : Order_book.Resting_order.t option) )
     ]
   in
   List.iter cases ~f:(fun (name, f) -> printf "%-20s %4d\n" name (words_per_run f));
@@ -97,5 +107,6 @@ let%expect_test "minor words per operation" =
     l2 10 levels          653
     match 1 fill (IOC)     26
     submit + cancel        37
+    submit + cancel deep   37
     |}]
 ;;
