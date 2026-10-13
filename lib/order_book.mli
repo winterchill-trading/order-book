@@ -4,9 +4,9 @@
     orders match against the opposite side best price first and, within a price, oldest
     first. Fills always execute at the maker's price.
 
-    Self-trade prevention: when the next maker in priority belongs to the taker's own
-    account, matching stops and the taker's remainder is cancelled (the resting order is
-    left untouched). Fills made before reaching the own order stand.
+    Self-trade prevention is a per-book policy ({!Stp.t}), applied when the next maker in
+    priority belongs to the taker's own account. Fills made before reaching the own order
+    always stand.
 
     The book is mutable and performs no margin or account checks; those belong to the
     caller. *)
@@ -37,6 +37,24 @@ module Cancel_reason : sig
   [@@deriving sexp_of, compare, equal]
 end
 
+(** Self-trade prevention policy of a book. *)
+module Stp : sig
+  type t =
+    | Cancel_taker
+    (** matching stops, the taker's remainder is cancelled with [Cancelled Self_trade] and
+        the resting order stays (the default) *)
+    | Expire_maker
+    (** the resting own order is removed and reported in [Result.expired_makers]; the
+        taker keeps matching behind it (Hyperliquid) *)
+    | Cancel_both
+    (** the resting own order is removed and reported, and the taker's remainder is
+        cancelled with [Cancelled Self_trade] *)
+  [@@deriving sexp_of, compare, equal, enumerate]
+
+  (** [Cancel_taker]. *)
+  val default : t
+end
+
 module Status : sig
   type t =
     | Resting (** the remainder rests on the book *)
@@ -52,14 +70,21 @@ module Result : sig
     ; status : Status.t
     ; filled : Size.t
     ; remaining : Size.t (** unfilled size: resting, cancelled or rejected *)
+    ; expired_makers : Resting_order.t list
+    (** own resting orders removed by self-trade prevention ([Expire_maker] or
+        [Cancel_both]), in the order they were reached; already off the book. Always empty
+        under [Cancel_taker]. *)
     }
   [@@deriving sexp_of]
 end
 
 type t [@@deriving sexp_of]
 
-val create : Symbol.t -> t
+(** [stp] defaults to [Stp.default] ([Cancel_taker]). *)
+val create : ?stp:Stp.t -> Symbol.t -> t
+
 val symbol : t -> Symbol.t
+val stp : t -> Stp.t
 
 (** Submits a limit order. [Gtc] rests any remainder, [Ioc] cancels it, [Alo] is rejected
     with [Would_cross] if it would match immediately and otherwise rests in full.

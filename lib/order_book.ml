@@ -24,6 +24,16 @@ module Cancel_reason = struct
   [@@deriving sexp_of, compare, equal]
 end
 
+module Stp = struct
+  type t =
+    | Cancel_taker
+    | Expire_maker
+    | Cancel_both
+  [@@deriving sexp_of, compare, equal, enumerate]
+
+  let default = Cancel_taker
+end
+
 module Status = struct
   type t =
     | Resting
@@ -39,6 +49,7 @@ module Result = struct
     ; status : Status.t
     ; filled : Size.t
     ; remaining : Size.t
+    ; expired_makers : Resting_order.t list
     }
   [@@deriving sexp_of]
 end
@@ -121,6 +132,7 @@ end
 
 type t =
   { symbol : Symbol.t
+  ; stp : Stp.t
   ; mutable bids : Level.t Price.Map.t
   ; mutable asks : Level.t Price.Map.t
   ; index : Level.node Order_id.Table.t
@@ -132,8 +144,9 @@ type t =
   }
 [@@deriving sexp_of]
 
-let create symbol =
+let create ?(stp = Stp.default) symbol =
   { symbol
+  ; stp
   ; bids = Price.Map.empty
   ; asks = Price.Map.empty
   ; index = Order_id.Table.create ()
@@ -143,6 +156,7 @@ let create symbol =
 ;;
 
 let symbol t = t.symbol
+let stp t = t.stp
 
 let side_levels t (side : Side.t) =
   match side with
@@ -249,6 +263,17 @@ let remove_level_if_empty t (side : Side.t) px (level : Level.t) =
     | _ -> ())
 ;;
 
+(* Removes a resting order's node from its level, the index and, if the level empties, the
+   side. *)
+let unlink t (node : Level.node) =
+  let order = node.order in
+  let level = node.level in
+  Hashtbl.remove t.index order.oid;
+  Level.remove level node;
+  level.total <- Size.( - ) level.total order.remaining;
+  remove_level_if_empty t order.side order.px level
+;;
+
 (* Per-call context of the incoming order, threaded through the matching loop.
 
    OxCaml: the record is allocated on the stack ([local_]) by [sweep]'s caller and passed
@@ -276,25 +301,31 @@ type stop =
 type swept =
   { global_ unfilled : Size.t
   ; global_ rev_fills : Fill.t list
+  ; global_ rev_expired : Resting_order.t list
   ; stop : stop
   }
 
 (* Matches [remaining] against the opposite side until filled, out of crossing liquidity,
-   or blocked by an own order. Returns the unfilled size, the fills in reverse execution
-   order and why matching stopped.
+   or stopped by an own order (depending on the book's [Stp.t]). Returns the unfilled
+   size, the fills and the expired own makers in reverse order, and why matching stopped.
 
    OxCaml: the recursive call is [exclave_ sweep ...], which ends this frame's region
    before the call so it stays a tail call while still returning into the caller's region
    (a plain call is rejected: the result is local, not a global return value). *)
-let rec sweep t (local_ (taker : taker)) remaining fills =
+let rec sweep t (local_ (taker : taker)) remaining fills expired =
   if Size.is_zero remaining
-  then exclave_ { unfilled = remaining; rev_fills = fills; stop = Done }
+  then
+    exclave_
+    { unfilled = remaining; rev_fills = fills; rev_expired = expired; stop = Done }
   else (
     let opposite = Side.flip taker.side in
     match best_level t opposite with
-    | None -> exclave_ { unfilled = remaining; rev_fills = fills; stop = Exhausted }
+    | None ->
+      exclave_
+      { unfilled = remaining; rev_fills = fills; rev_expired = expired; stop = Exhausted }
     | Some level when not (crosses taker.side ~limit:taker.limit level.px) ->
-      exclave_ { unfilled = remaining; rev_fills = fills; stop = Exhausted }
+      exclave_
+      { unfilled = remaining; rev_fills = fills; rev_expired = expired; stop = Exhausted }
     | Some level ->
       let px = level.px in
       let node =
@@ -304,7 +335,26 @@ let rec sweep t (local_ (taker : taker)) remaining fills =
       in
       let maker = node.order in
       if Account.equal maker.owner taker.owner
-      then exclave_ { unfilled = remaining; rev_fills = fills; stop = Self_trade }
+      then (
+        match t.stp with
+        | Cancel_taker ->
+          exclave_
+          { unfilled = remaining
+          ; rev_fills = fills
+          ; rev_expired = expired
+          ; stop = Self_trade
+          }
+        | Expire_maker ->
+          unlink t node;
+          exclave_ sweep t taker remaining fills (maker :: expired)
+        | Cancel_both ->
+          unlink t node;
+          exclave_
+          { unfilled = remaining
+          ; rev_fills = fills
+          ; rev_expired = maker :: expired
+          ; stop = Self_trade
+          })
       else (
         let sz = Size.min remaining maker.remaining in
         maker.remaining <- Size.( - ) maker.remaining sz;
@@ -329,7 +379,7 @@ let rec sweep t (local_ (taker : taker)) remaining fills =
           ; time = taker.time
           }
         in
-        exclave_ sweep t taker (Size.( - ) remaining sz) (fill :: fills)))
+        exclave_ sweep t taker (Size.( - ) remaining sz) (fill :: fills) expired))
 ;;
 
 let check_new_order t ~oid ~sz =
@@ -343,8 +393,11 @@ let execute t ~oid ~owner ~side ~limit ~sz ~tif ~reduce_only ~cloid ~time ~next_
   : Result.t
   =
   let local_ taker = { oid; owner; side; limit; cloid; time; next_tid } in
-  let { unfilled = remaining; rev_fills; stop } = sweep t taker sz [] in
+  let { unfilled = remaining; rev_fills; rev_expired; stop } = sweep t taker sz [] [] in
   let fills = List.rev rev_fills in
+  (* [List.rev []] returns the same immediate, so no-self-trade calls allocate nothing
+     extra here. *)
+  let expired_makers = List.rev rev_expired in
   let filled = Size.( - ) sz remaining in
   let status : Status.t =
     match stop, (tif : Tif.t) with
@@ -366,7 +419,7 @@ let execute t ~oid ~owner ~side ~limit ~sz ~tif ~reduce_only ~cloid ~time ~next_
         };
       Resting
   in
-  { fills; status; filled; remaining }
+  { fills; status; filled; remaining; expired_makers }
 ;;
 
 let add_limit
@@ -395,7 +448,13 @@ let add_limit
       | Some best -> crosses side ~limit:px best.px
     in
     if would_cross
-    then { fills = []; status = Would_cross; filled = Size.zero; remaining = sz }
+    then
+      { fills = []
+      ; status = Would_cross
+      ; filled = Size.zero
+      ; remaining = sz
+      ; expired_makers = []
+      }
     else (
       rest
         t
@@ -409,7 +468,12 @@ let add_limit
         ; reduce_only
         ; cloid
         };
-      { fills = []; status = Resting; filled = Size.zero; remaining = sz })
+      { fills = []
+      ; status = Resting
+      ; filled = Size.zero
+      ; remaining = sz
+      ; expired_makers = []
+      })
   | Gtc | Ioc ->
     execute t ~oid ~owner ~side ~limit:px ~sz ~tif ~reduce_only ~cloid ~time ~next_tid
 ;;
@@ -442,7 +506,12 @@ let market
   check_new_order t ~oid ~sz;
   match market_limit_px t ~side ~slippage_bps with
   | None ->
-    { fills = []; status = Cancelled Ioc_unfilled; filled = Size.zero; remaining = sz }
+    { fills = []
+    ; status = Cancelled Ioc_unfilled
+    ; filled = Size.zero
+    ; remaining = sz
+    ; expired_makers = []
+    }
   | Some limit ->
     execute t ~oid ~owner ~side ~limit ~sz ~tif:Ioc ~reduce_only ~cloid ~time ~next_tid
 ;;
@@ -462,13 +531,8 @@ let cancel t oid =
     t.index
     oid
     ~if_found:(fun (node : Level.node) ->
-      Hashtbl.remove t.index oid;
-      let order = node.order in
-      let level = node.level in
-      Level.remove level node;
-      level.total <- Size.( - ) level.total order.remaining;
-      remove_level_if_empty t order.side order.px level;
-      Some order)
+      unlink t node;
+      Some node.order)
     ~if_not_found:(fun _ -> None)
 ;;
 
