@@ -24,7 +24,11 @@ let print_result (r : Order_book.Result.t) =
         ~status:(r.status : Order_book.Status.t)
         ~filled:(r.filled : Size.t)
         ~remaining:(r.remaining : Size.t)
-        (fills : Sexp.t list)]
+        (fills : Sexp.t list)
+        ~expired:
+          (List.map r.expired_makers ~f:(fun (o : Order_book.Resting_order.t) ->
+             Order_id.to_int_exn o.oid)
+           : (int list[@sexp.omit_nil]))]
 ;;
 
 module Book = struct
@@ -35,7 +39,10 @@ module Book = struct
     ; mutable time : int
     }
 
-  let create () = { book = Order_book.create btc; next_oid = 1; next_tid = 1; time = 0 }
+  let create ?stp () =
+    { book = Order_book.create ?stp btc; next_oid = 1; next_tid = 1; time = 0 }
+  ;;
+
   let book t = t.book
 
   let fresh t =

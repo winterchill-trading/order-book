@@ -102,6 +102,67 @@ let%expect_test "self-trade cancels the taker's remainder, keeps earlier fills" 
   [%expect {| ((bids ()) (asks ("100 x 1 (1)" "101 x 1 (1)"))) |}]
 ;;
 
+(* The same book under each policy: account 1 rests asks at 100 and 101, account 2 one at
+   100 between them in time; account 1 then buys 3 up to 101. *)
+let self_trade_setup stp =
+  let b = Book.create ~stp () in
+  ignore (Book.limit ~quiet:true b ~owner:2 Sell "100" "1");
+  ignore (Book.limit ~quiet:true b ~owner:1 Sell "100" "1");
+  ignore (Book.limit ~quiet:true b ~owner:2 Sell "100" "1");
+  ignore (Book.limit ~quiet:true b ~owner:2 Sell "101" "2");
+  b
+;;
+
+let%expect_test "self-trade: Expire_maker removes the own order and keeps matching" =
+  let b = self_trade_setup Expire_maker in
+  ignore (Book.limit b ~owner:1 Buy "101" "3");
+  [%expect
+    {|
+    ((status Filled) (filled 3) (remaining 0)
+     (fills
+      (((tid 1) (px 100) (sz 1) (taker (5 1)) (maker (1 2)))
+       ((tid 2) (px 100) (sz 1) (taker (5 1)) (maker (3 2)))
+       ((tid 3) (px 101) (sz 1) (taker (5 1)) (maker (4 2)))))
+     (expired (2)))
+    |}];
+  Book.print_l2 b;
+  [%expect {| ((bids ()) (asks ("101 x 1 (1)"))) |}]
+;;
+
+let%expect_test "self-trade: Expire_maker lets a GTC taker rest where its own order was" =
+  let b = Book.create ~stp:Expire_maker () in
+  ignore (Book.limit ~quiet:true b ~owner:1 Sell "100" "1");
+  ignore (Book.limit b ~owner:1 Buy "100" "2");
+  [%expect {| ((status Resting) (filled 0) (remaining 2) (fills ()) (expired (1))) |}];
+  Book.print_l2 b;
+  [%expect {| ((bids ("100 x 2 (1)")) (asks ())) |}]
+;;
+
+let%expect_test "self-trade: Cancel_both removes the own order and the taker remainder" =
+  let b = self_trade_setup Cancel_both in
+  ignore (Book.limit b ~owner:1 Buy "101" "3");
+  [%expect
+    {|
+    ((status (Cancelled Self_trade)) (filled 1) (remaining 2)
+     (fills (((tid 1) (px 100) (sz 1) (taker (5 1)) (maker (1 2)))))
+     (expired (2)))
+    |}];
+  Book.print_l2 b;
+  [%expect {| ((bids ()) (asks ("100 x 1 (1)" "101 x 2 (1)"))) |}]
+;;
+
+let%expect_test "self-trade: Cancel_taker (default) keeps the own order" =
+  let b = self_trade_setup Cancel_taker in
+  ignore (Book.limit b ~owner:1 Buy "101" "3");
+  [%expect
+    {|
+    ((status (Cancelled Self_trade)) (filled 1) (remaining 2)
+     (fills (((tid 1) (px 100) (sz 1) (taker (5 1)) (maker (1 2))))))
+    |}];
+  Book.print_l2 b;
+  [%expect {| ((bids ()) (asks ("100 x 2 (2)" "101 x 2 (1)"))) |}]
+;;
+
 let%expect_test "market order sweeps within slippage" =
   let b = Book.create () in
   ignore (Book.limit ~quiet:true b ~owner:1 Sell "100" "1");

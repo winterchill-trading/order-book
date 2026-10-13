@@ -12,7 +12,7 @@ val btc : Symbol.t
 module Book : sig
   type t
 
-  val create : unit -> t
+  val create : ?stp:Order_book.Stp.t -> unit -> t
   val book : t -> Order_book.t
 
   (** Places a limit order for account [owner] and returns its oid; prints the result. *)
@@ -38,4 +38,5 @@ module Book : sig
   val print_l2 : ?n_levels:int -> t -> unit
 end
 
+(** Prints status, sizes, fills and, when any, the oids of expired own makers. *)
 val print_result : Order_book.Result.t -> unit
