@@ -14,6 +14,7 @@ let outcome_of_result (r : Order_book.Result.t) : Naive_book.Outcome.t =
         { Naive_book.Fill.maker_oid = f.maker_oid; px = f.px; sz = f.sz })
   ; status = r.status
   ; remaining = r.remaining
+  ; expired = List.map r.expired_makers ~f:(fun (o : Order_book.Resting_order.t) -> o.oid)
   }
 ;;
 
@@ -48,9 +49,9 @@ let step ~book ~model ~oid (op : Op.t) =
   Order_book.invariant book
 ;;
 
-let run ops =
-  let book = Order_book.create btc in
-  let model = Naive_book.create () in
+let run ?(stp = Order_book.Stp.default) ops =
+  let book = Order_book.create ~stp btc in
+  let model = Naive_book.create ~stp () in
   List.iteri ops ~f:(fun i op -> step ~book ~model ~oid:(Order_id.of_int (i + 1)) op)
 ;;
 
@@ -63,6 +64,18 @@ let%test_unit "order book and naive matcher agree on random operation sequences"
     ~f:run
 ;;
 
+(* The same property under every self-trade prevention policy. Owners are drawn from four
+   accounts, so own makers are reached often. *)
+let%test_unit "order book and naive matcher agree under each self-trade policy" =
+  List.iter Order_book.Stp.all ~f:(fun stp ->
+    Quickcheck.test
+      ~trials:1000
+      ~sexp_of:[%sexp_of: Op.t list]
+      ~examples:Op.examples
+      (Quickcheck.Generator.list_with_length n_oids Op.gen)
+      ~f:(run ~stp))
+;;
+
 let%test_unit "fuzz: random byte strings decoded into operations" =
   Quickcheck.test
     ~trials:1000
@@ -71,7 +84,7 @@ let%test_unit "fuzz: random byte strings decoded into operations" =
     (let open Quickcheck.Generator.Let_syntax in
      let%bind len = Int.gen_incl 0 (3 * n_oids) in
      String.gen_with_length len Char.quickcheck_generator)
-    ~f:(fun s -> run (Op.of_bytes s))
+    ~f:(fun s -> List.iter Order_book.Stp.all ~f:(fun stp -> run ~stp (Op.of_bytes s)))
 ;;
 
 let%expect_test "byte decoding" =

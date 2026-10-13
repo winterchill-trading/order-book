@@ -43,6 +43,11 @@ let limit ?(tif = Tif.Gtc) owner side px sz = Limit { owner; side; px; sz; tif }
 let examples =
   [ (* Self-trade in the middle of a sweep: one fill, then the taker's own ask stops it. *)
     [ limit 1 Sell 100 2; limit 2 Sell 101 2; limit 2 Buy 102 5 ]
+  ; (* Two own makers in a row, then other liquidity behind them: under Expire_maker both
+       expire and the taker fills against account 3. *)
+    [ limit 1 Sell 100 1; limit 1 Sell 100 1; limit 3 Sell 101 2; limit 1 Buy 101 3 ]
+  ; (* An own maker that empties its level, with a market order behind it. *)
+    [ limit 2 Buy 99 1; limit 1 Buy 98 1; Market { owner = 2; side = Sell; sz = 2 } ]
   ; (* ALO at the touch is rejected; one tick away it rests. *)
     [ limit 1 Sell 100 1; limit ~tif:Alo 2 Buy 100 1; limit ~tif:Alo 2 Buy 99 1 ]
   ; (* Market on an empty book, then a market order limited by the 3% slippage. *)
