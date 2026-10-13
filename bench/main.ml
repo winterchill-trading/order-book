@@ -36,12 +36,20 @@ let add book ?(owner = maker) ?(tif = Tif.Gtc) side px sz =
 let best_bid_px = 10_000
 let best_ask_px = 10_001
 
+(* One bid level, 100 ticks deep, holds [deep_queue] orders instead of one, so a cancel
+   there shows whether removing an order is linear in the level's queue. *)
+let deep_level_px = best_bid_px - 100
+let deep_queue = 1_000
+
 let make_book () =
   let book = Order_book.create (Symbol.of_string "BTC") in
   for i = 0 to levels_per_side - 1 do
     ignore (add book Buy (best_bid_px - i) 10 : Order_book.Result.t);
     let sz = if i = 0 then 1_000_000_000 else 10 in
     ignore (add book Sell (best_ask_px + i) sz : Order_book.Result.t)
+  done;
+  for _ = 2 to deep_queue do
+    ignore (add book Buy deep_level_px 10 : Order_book.Result.t)
   done;
   book
 ;;
@@ -56,6 +64,13 @@ let oid_exn (r : Order_book.Result.t) oid =
 let submit_and_cancel book () =
   let oid = Order_id.of_int (!Ids.next + 1) in
   let oid = oid_exn (add book Buy (best_bid_px - 250) 1) oid in
+  ignore (Order_book.cancel book oid : Order_book.Resting_order.t option)
+;;
+
+(* Submit a passive bid behind [deep_queue] orders, then cancel it from the tail. *)
+let submit_and_cancel_deep book () =
+  let oid = Order_id.of_int (!Ids.next + 1) in
+  let oid = oid_exn (add book Buy deep_level_px 1) oid in
   ignore (Order_book.cancel book oid : Order_book.Resting_order.t option)
 ;;
 
@@ -85,6 +100,8 @@ let l2_ten book () =
 ;;
 
 let best_bid book () = ignore (Order_book.best_bid book : Price.t option)
+let best_ask book () = ignore (Order_book.best_ask book : Price.t option)
+let mid book () = ignore (Order_book.mid book : Price.t option)
 
 let () =
   let book = make_book () in
@@ -92,11 +109,16 @@ let () =
     (Bench.make_command
        [ Bench.Test.create ~name:"submit+cancel (existing level)" (submit_and_cancel book)
        ; Bench.Test.create
+           ~name:"submit+cancel (1000-order level)"
+           (submit_and_cancel_deep book)
+       ; Bench.Test.create
            ~name:"submit+cancel (new level)"
            (submit_new_level_and_cancel book)
        ; Bench.Test.create ~name:"match 1 fill (IOC)" (match_one book)
        ; Bench.Test.create ~name:"sweep 10 levels + refill" (sweep_ten book)
        ; Bench.Test.create ~name:"l2 10 levels" (l2_ten book)
        ; Bench.Test.create ~name:"best_bid" (best_bid book)
+       ; Bench.Test.create ~name:"best_ask" (best_ask book)
+       ; Bench.Test.create ~name:"mid" (mid book)
        ])
 ;;
