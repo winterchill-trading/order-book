@@ -96,6 +96,6 @@ let%expect_test "minor words per operation" =
     find                    2
     l2 10 levels          653
     match 1 fill (IOC)     26
-    submit + cancel        38
+    submit + cancel        37
     |}]
 ;;

@@ -43,20 +43,84 @@ module Result = struct
   [@@deriving sexp_of]
 end
 
+(* A price level is an intrusive doubly linked FIFO of nodes, and the order index maps
+   each oid to its node, so cancelling an order unlinks it in O(1) instead of filtering
+   the level's queue. Links are [or_null], so an end of the list is an immediate, not a
+   [Some] box. *)
 module Level = struct
-  type t =
+  type node =
+    { order : Resting_order.t
+    ; level : t
+    ; mutable prev : node or_null
+    ; mutable next : node or_null
+    }
+
+  and t =
     { px : Price.t
     ; mutable total : Size.t
-    ; orders : Resting_order.t Queue.t
+    ; mutable head : node or_null
+    ; mutable tail : node or_null
+    ; mutable length : int
     }
-  [@@deriving sexp_of]
+
+  let create px = { px; total = Size.zero; head = Null; tail = Null; length = 0 }
+  let is_empty t = t.length = 0
+
+  let push_back t order =
+    let node = { order; level = t; prev = t.tail; next = Null } in
+    (match t.tail with
+     | Null -> t.head <- This node
+     | This last -> last.next <- This node);
+    t.tail <- This node;
+    t.length <- t.length + 1;
+    node
+  ;;
+
+  let remove t node =
+    (match node.prev with
+     | Null -> t.head <- node.next
+     | This prev -> prev.next <- node.next);
+    (match node.next with
+     | Null -> t.tail <- node.prev
+     | This next -> next.prev <- node.prev);
+    node.prev <- Null;
+    node.next <- Null;
+    t.length <- t.length - 1
+  ;;
+
+  (* A loop rather than recursion: a level can hold any number of orders, and a recursive
+     call passing the [local_] [f] could not be a tail call. *)
+  let iter t ~(f : Resting_order.t -> unit @ local) =
+    let mutable cur = t.head in
+    let mutable continue = true in
+    while continue do
+      match cur with
+      | Null -> continue <- false
+      | This node ->
+        f node.order;
+        cur <- node.next
+    done
+  ;;
+
+  let to_list t =
+    let acc = ref [] in
+    iter t ~f:(fun o -> acc := o :: !acc);
+    List.rev !acc
+  ;;
+
+  let sexp_of_t t =
+    [%sexp
+      { px : Price.t = t.px; total : Size.t = t.total; orders : Resting_order.t list = to_list t }]
+  ;;
+
+  let sexp_of_node node = Resting_order.sexp_of_t node.order
 end
 
 type t =
   { symbol : Symbol.t
   ; mutable bids : Level.t Price.Map.t
   ; mutable asks : Level.t Price.Map.t
-  ; index : Resting_order.t Order_id.Table.t
+  ; index : Level.node Order_id.Table.t
   ; (* The best level of each side, cached so that queries and the matching loop do not
        allocate the [(key, data) option] that [Map.max_elt] and [Map.min_elt] return.
        Updated when a better level is created or the best level is removed. *)
@@ -154,20 +218,20 @@ let rest t (order : Resting_order.t) =
     match Map.find levels order.px with
     | Some level -> level
     | None ->
-      let level = { Level.px = order.px; total = Size.zero; orders = Queue.create () } in
+      let level = Level.create order.px in
       set_side_levels t order.side (Map.set levels ~key:order.px ~data:level);
       (match top t order.side with
        | Some (best : Level.t) when not (better order.side order.px ~than:best.px) -> ()
        | _ -> set_top t order.side (Some level));
       level
   in
-  Queue.enqueue level.orders order;
+  let node = Level.push_back level order in
   level.total <- Size.( + ) level.total order.remaining;
-  Hashtbl.set t.index ~key:order.oid ~data:order
+  Hashtbl.set t.index ~key:order.oid ~data:node
 ;;
 
 let remove_level_if_empty t (side : Side.t) px (level : Level.t) =
-  if Queue.is_empty level.orders
+  if Level.is_empty level
   then (
     let levels = Map.remove (side_levels t side) px in
     set_side_levels t side levels;
@@ -230,7 +294,12 @@ let rec sweep t (local_ (taker : taker)) remaining fills =
       exclave_ { unfilled = remaining; rev_fills = fills; stop = Exhausted }
     | Some level ->
       let px = level.px in
-      let maker = Queue.peek_exn level.orders in
+      let node =
+        match level.head with
+        | This node -> node
+        | Null -> raise_s [%message "Order_book: empty level on the book"]
+      in
+      let maker = node.order in
       if Account.equal maker.owner taker.owner
       then exclave_ { unfilled = remaining; rev_fills = fills; stop = Self_trade }
       else (
@@ -239,7 +308,7 @@ let rec sweep t (local_ (taker : taker)) remaining fills =
         level.total <- Size.( - ) level.total sz;
         if Size.is_zero maker.remaining
         then (
-          ignore (Queue.dequeue_exn level.orders : Resting_order.t);
+          Level.remove level node;
           Hashtbl.remove t.index maker.oid;
           remove_level_if_empty t opposite px level);
         let fill : Fill.t =
@@ -375,20 +444,29 @@ let market
     execute t ~oid ~owner ~side ~limit ~sz ~tif:Ioc ~reduce_only ~cloid ~time ~next_tid
 ;;
 
-let find t oid = Hashtbl.find t.index oid
+let find t oid =
+  Hashtbl.find_and_call
+    t.index
+    oid
+    ~if_found:(fun (node : Level.node) -> Some node.order)
+    ~if_not_found:(fun _ -> None)
+;;
 
+(* OxCaml: [find_and_call]'s callbacks are [local_], so these closures, which capture [t],
+   live on the stack. The node holds its level, so no map lookup is needed. *)
 let cancel t oid =
-  match Hashtbl.find_and_remove t.index oid with
-  | None -> None
-  | Some (order : Resting_order.t) ->
-    (match Map.find (side_levels t order.side) order.px with
-     | None -> ()
-     | Some level ->
-       Queue.filter_inplace level.orders ~f:(fun (o : Resting_order.t) ->
-         not (Order_id.equal o.oid oid));
-       level.total <- Size.( - ) level.total order.remaining;
-       remove_level_if_empty t order.side order.px level);
-    Some order
+  Hashtbl.find_and_call
+    t.index
+    oid
+    ~if_found:(fun (node : Level.node) ->
+      Hashtbl.remove t.index oid;
+      let order = node.order in
+      let level = node.level in
+      Level.remove level node;
+      level.total <- Size.( - ) level.total order.remaining;
+      remove_level_if_empty t order.side order.px level;
+      Some order)
+    ~if_not_found:(fun _ -> None)
 ;;
 
 let levels_best_first t (side : Side.t) =
@@ -402,7 +480,7 @@ let l2 t ~n_levels =
     levels_best_first t side
     |> Fn.flip Sequence.take n_levels
     |> Sequence.map ~f:(fun (px, (level : Level.t)) ->
-      { L2.Level.px; sz = level.total; n = Queue.length level.orders })
+      { L2.Level.px; sz = level.total; n = level.length })
     |> Sequence.to_list
   in
   side_l2 Buy, side_l2 Sell
@@ -411,7 +489,7 @@ let l2 t ~n_levels =
 let iter t ~(f @ local) =
   (* OxCaml: [f] is a [local_] closure, and Base's [Map.iter] / [Queue.iter] accept local
      closures too, so the wrapper closures below stay on the stack. *)
-  let visit_level (level : Level.t) = Queue.iter level.orders ~f in
+  let visit_level (level : Level.t) = Level.iter level ~f in
   Map.fold_right t.bids ~init:() ~f:(fun ~key:_ ~data () -> visit_level data);
   Map.iter t.asks ~f:visit_level [@nontail]
 ;;
@@ -429,21 +507,41 @@ let invariant t =
   let count = ref 0 in
   let check_side (side : Side.t) levels =
     Map.iteri levels ~f:(fun ~key:px ~data:(level : Level.t) ->
-      if Queue.is_empty level.orders
+      if Level.is_empty level
       then raise_s [%message "empty level" (side : Side.t) (px : Price.t)];
-      let total =
-        Queue.fold level.orders ~init:Size.zero ~f:(fun acc (o : Resting_order.t) ->
+      let total = ref Size.zero in
+      let length = ref 0 in
+      let rec walk (prev : Level.node or_null) (cur : Level.node or_null) =
+        match cur with
+        | Null ->
+          (match prev, level.tail with
+           | Null, Null -> ()
+           | This p, This tail when phys_equal p tail -> ()
+           | _ -> raise_s [%message "level tail is not the last node" (px : Price.t)])
+        | This node ->
+          let o = node.order in
+          (match prev, node.prev with
+           | Null, Null -> ()
+           | This p, This p' when phys_equal p p' -> ()
+           | _ -> raise_s [%message "broken prev link" (o : Resting_order.t)]);
+          if not (phys_equal node.level level)
+          then raise_s [%message "node points to another level" (o : Resting_order.t)];
           if not (Size.is_positive o.remaining)
           then raise_s [%message "non-positive remaining" (o : Resting_order.t)];
           if not (Price.equal o.px px && Side.equal o.side side)
           then raise_s [%message "order on wrong level" (o : Resting_order.t)];
           (match Hashtbl.find t.index o.oid with
-           | Some o' when phys_equal o o' -> ()
+           | Some n when phys_equal n node -> ()
            | _ -> raise_s [%message "order missing from index" (o : Resting_order.t)]);
           incr count;
-          Size.( + ) acc o.remaining)
+          incr length;
+          total := Size.( + ) !total o.remaining;
+          walk cur node.next
       in
-      if not (Size.equal total level.total)
+      walk Null level.head;
+      if !length <> level.length
+      then raise_s [%message "level length mismatch" (px : Price.t)];
+      if not (Size.equal !total level.total)
       then raise_s [%message "level total mismatch" (px : Price.t)])
   in
   check_side Buy t.bids;
