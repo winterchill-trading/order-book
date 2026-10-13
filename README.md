@@ -47,7 +47,8 @@ The library `order-book` exposes one module, `Order_book`:
   (`Exchange_core.Trade_id.t`) come from a caller-supplied `next_tid` function called
   once per fill. The book never reads the
   wall clock.
-- **Matching.** Each side is a `Map` from price to a FIFO `Queue`. Incoming orders match
+- **Matching.** Each side is a `Map` from price to a level, and a level is a FIFO of
+  resting orders. Incoming orders match
   against the opposite side best price first and, within a price, oldest first. Fills
   execute at the maker's price. Market orders are IOC orders priced `slippage_bps`
   through the best opposite price.
@@ -71,7 +72,7 @@ per-order temporaries:
 - the loop's result is returned in the caller's region with `exclave_`, as a record with
   `global_` fields (a local tuple would make its components local, and they could not
   escape into the result);
-- `Order_book.iter` takes its callback `@ local`, and Base's `Map` and `Queue` iterators
+- `Order_book.iter` takes its callback `@ local`, and Base's `Map` iterators
   accept local closures, so the wrappers stay on the stack.
 
 ### Unboxed fields and `or_null` (analysis)
@@ -84,8 +85,8 @@ Candidates on the hot path, not yet changed. Prices, sizes and ids are already t
 | `t.top_bid`, `t.top_ask` | `Level.t option` | `Level.t or_null` | no `Some` allocation when the best level changes, one load less per matching step |
 | `Fill.t.taker_cloid`, `maker_cloid` | `Client_order_id.t option` | `or_null` | 2 words less per fill when a client id is set |
 | `Resting_order.t.cloid` | `Client_order_id.t option` | `or_null` | 2 words less per resting order with a client id |
-| `best_bid`, `best_ask`, `mid` results | `Price.t option` | `Price.t or_null` | no allocation at all; changes the public interface |
-| `Level.t.orders` | pointer to a `Queue.t` record, which points to its array | queue fields inlined into `Level.t` (own ring buffer, or an unboxed record field) | one pointer hop per maker visited |
+| `best_bid`, `best_ask`, `mid` results | `Price.t option` | `Price.t or_null` | done, as `best_bid_or_null`, `best_ask_or_null`, `mid_or_null` beside the option versions: 0 words |
+| `Level.t.orders` | pointer to a `Queue.t` record, which points to its array | done: the level holds the head and tail of an intrusive list of nodes | O(1) cancel (see below) |
 | `Fixed_decimal.S.t` (`Price`, `Size`) | abstract type, layout `value` | declared `immediate` | lets local values cross modes, so `exclave_` query variants become usable (see Allocation), and allows `int`-like unboxed storage |
 
 `Fill.t` itself has to stay a heap record: fills are returned to the caller in a list.
@@ -181,3 +182,38 @@ be passed to `Price.to_units`, `Price.equal` or any other function taking a glob
 argument. The variant was dropped; it becomes useful once `Fixed_decimal.S.t` is declared
 `immediate`. `l2` allocates its result lists and the `Sequence` machinery; it is not on
 the matching path.
+
+### `or_null` queries and O(1) cancel
+
+`best_bid_or_null`, `best_ask_or_null` and `mid_or_null` return `Price.t or_null`
+(`Null` where the option versions return `None`) and allocate nothing; the first two are
+`[@@zero_alloc]` in the `.mli`. `mid_or_null` is not annotated because the checker
+cannot see through `Price.of_units` in `fixed-decimal`; `test/test_alloc.ml` pins it at
+0 words. `invariant` checks that each agrees with its option version, so every property
+test compares them.
+
+A level is an intrusive doubly linked list of nodes (`prev`/`next` are `node or_null`, so
+an end of the list is an immediate rather than a `Some` box), and the order index maps
+each oid to its node, which also points to its level. `cancel` unlinks the node in O(1)
+with no map lookup; it used to run `Queue.filter_inplace` over the whole level after a
+`Map.find`. The bisimulation test against `test/naive_book.ml` and a head/middle/tail
+cancel expect test cover the change, and `invariant` now checks the links.
+
+Minor words per call, from `test/test_alloc.ml` (exact) and core_bench (which adds 3
+words of harness per case):
+
+| Operation | Before | After |
+| --- | ---: | ---: |
+| `best_bid` / `best_ask` / `mid` | 2 | 2 (option), 0 (`or_null`) |
+| submit + cancel, existing level | 38 | 37 |
+| submit + cancel behind 1000 orders (bench) | 556 minor and 1538 major | 40 |
+| submit + cancel, new level (bench) | 183 | 175 |
+| match 1 fill (IOC) | 26 | 26 |
+
+Time per call for the cancel behind 1000 orders, best of two runs per build on an Apple
+M3 Max: 24.8 us to 0.26 us at best, and 25 to 106 us before against 0.32 to 0.86 us
+after in every dev, release and `-O3` run. The other cases measured within noise of the
+earlier tables: the machine was shared with heavy parallel builds during the run, so
+sub-microsecond timings from it are not reported. CI runs on amd64; these numbers are
+arm64.
+
