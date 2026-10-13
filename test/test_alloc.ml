@@ -5,7 +5,8 @@ open Helpers
 (* Minor-heap words allocated per operation on a 1000-level book (500 bids, 500 asks, one
    maker per level, a deep best ask). Each case leaves the book unchanged so it can be
    repeated. The numbers are what the compiler produces today; a change here is a change
-   in allocation behaviour. *)
+   in allocation behaviour. The single fill went from 26 to 27 words when [Result.t] gained
+   [expired_makers] (one more field; the empty list itself is an immediate). *)
 
 let maker = addr 1
 let taker = addr 2
@@ -105,7 +106,7 @@ let%expect_test "minor words per operation" =
     mid_or_null             0
     find                    2
     l2 10 levels          653
-    match 1 fill (IOC)     26
+    match 1 fill (IOC)     27
     submit + cancel        37
     submit + cancel deep   37
     |}]
