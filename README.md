@@ -39,7 +39,8 @@ The library `order-book` exposes one module, `Order_book`:
 | `Order_book` | One instrument's book: price-time priority, GTC/IOC/ALO limit orders, slippage-bounded market orders, cancel, L2 snapshot, iteration, invariant check |
 | `Order_book.Fill` | A taker/maker match: trade id, symbol, price, size, both order ids, accounts and client order ids |
 | `Order_book.Resting_order` | An order on the book, with its mutable remaining size |
-| `Order_book.Status`, `Order_book.Cancel_reason`, `Order_book.Result` | Outcome of a submission: fills in execution order, filled and remaining size |
+| `Order_book.Stp` | Self-trade prevention policy of a book: `Cancel_taker` (default), `Expire_maker`, `Cancel_both` |
+| `Order_book.Status`, `Order_book.Cancel_reason`, `Order_book.Result` | Outcome of a submission: fills in execution order, filled and remaining size, own makers expired by self-trade prevention |
 
 ## Design notes
 
@@ -54,9 +55,20 @@ The library `order-book` exposes one module, `Order_book`:
   through the best opposite price.
 - **Time in force.** `Gtc` rests any remainder, `Ioc` cancels it, `Alo` is rejected with
   `Would_cross` if it would take liquidity and otherwise rests in full.
-- **Self-trade prevention.** When the next maker in priority belongs to the taker,
-  matching stops and the taker's remainder is cancelled; earlier fills stand and the
-  resting order is untouched.
+- **Self-trade prevention.** A per-book policy, chosen with
+  `Order_book.create ?stp`, applied when the next maker in priority belongs to the taker.
+  Earlier fills always stand.
+
+  | `Stp.t` | Resting own order | Taker | Used by |
+  | --- | --- | --- | --- |
+  | `Cancel_taker` (default) | stays on the book | remainder cancelled, `Cancelled Self_trade` | Binance and Bybit simulators (unchanged behaviour) |
+  | `Expire_maker` | removed, listed in `Result.expired_makers` | keeps matching behind it; may fill, rest or be IOC-cancelled as usual | Hyperliquid |
+  | `Cancel_both` | removed, listed in `Result.expired_makers` | remainder cancelled, `Cancelled Self_trade` | |
+
+  `Result.expired_makers` holds the removed orders in the order they were reached, so an
+  engine can release their margin and report them (on Hyperliquid, `selfTradeCanceled` in
+  `orderUpdates`). Expired orders produce no fill and no fee. It is always empty under
+  `Cancel_taker`.
 - **Fixed point.** Prices and sizes count units of `10^-8` in an `int`; the market order
   limit price is computed with `Fixed_decimal.mul_units`, which does not overflow and
   truncates toward zero.
@@ -106,8 +118,9 @@ after each random operation both must report the same fills, status, remainder, 
 result and full L2. A second property decodes random byte strings into operations
 (`Op.of_bytes`) as a fuzz input. Hand-picked edge cases (self-trade mid-sweep, ALO at
 the touch, market orders on an empty book or beyond the slippage limit, cancelling a
-filled order, FIFO after a partial fill) are pinned with `~examples`, so they run on
-every test run. `test/test_alloc.ml` prints minor words per operation.
+filled order, FIFO after a partial fill, consecutive own makers) are pinned with
+`~examples`, so they run on every test run. The reference matcher implements each
+self-trade policy independently, and both properties run under all three policies. `test/test_alloc.ml` prints minor words per operation.
 
 ## Benchmarks
 
@@ -132,6 +145,24 @@ Apple M3 Max, default (non `-O3`) build:
 
 These are the numbers before the best-level cache described under Allocation; with it,
 `best_bid` takes 4 ns and 5 words and a single-fill match 27 words.
+
+### Self-trade policy
+
+Adding `Stp.t` and `Result.expired_makers` (three runs each of the bench at the previous
+commit and with the change, `-quota 2`, same machine, dev build):
+
+| Case | Before | After |
+| --- | ---: | ---: |
+| submit + cancel, existing level | 143 to 144 ns, 40 w | 147 ns, 40 w |
+| submit + cancel, 1000-order level | 145 ns, 40 w | 154 to 155 ns, 40 w |
+| submit + cancel, new level | 278 to 280 ns, 175 w | 282 to 286 ns, 175 w |
+| match 1 fill (IOC) | 69 to 71 ns, 27 w | 71 to 72 ns, 28 w |
+| sweep 10 levels, then re-add | 3.19 to 3.20 us, 1762 w | 3.22 to 3.34 us, 1773 w |
+
+Times are within noise of each other. The one extra word per submission is the new
+`Result.t` field (the empty list is an immediate). `test/test_alloc.ml` pins a single
+fill at 27 words (was 26) and resting an own ask then expiring it with an own IOC at 58
+words. Numbers are arm64; CI runs on amd64.
 
 ### Release build and `-O3`
 
