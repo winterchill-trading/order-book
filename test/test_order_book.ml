@@ -139,6 +139,29 @@ let%expect_test "cancel" =
   [%expect {| ((bids ("99 x 2 (1)")) (asks ())) |}]
 ;;
 
+let%expect_test "cancel at the head, middle and tail of a level keeps time priority" =
+  let b = Book.create () in
+  let rest owner = fst (Book.limit ~quiet:true b ~owner Sell "100" "1") in
+  let o1 = rest 1 in
+  let o2 = rest 2 in
+  let _o3 = rest 3 in
+  let o4 = rest 4 in
+  List.iter [ o2; o4; o1 ] ~f:(fun oid ->
+    ignore (Order_book.cancel (Book.book b) oid : Order_book.Resting_order.t option);
+    Order_book.invariant (Book.book b));
+  let _o5 = rest 5 in
+  Book.print_l2 b;
+  [%expect {| ((bids ()) (asks ("100 x 2 (2)"))) |}];
+  ignore (Book.limit ~tif:Ioc b ~owner:9 Buy "100" "3");
+  [%expect {|
+    ((status (Cancelled Ioc_unfilled)) (filled 2) (remaining 1)
+     (fills
+      (((tid 1) (px 100) (sz 1) (taker (6 9)) (maker (3 3)))
+       ((tid 2) (px 100) (sz 1) (taker (6 9)) (maker (5 5))))))
+    |}];
+  Order_book.invariant (Book.book b)
+;;
+
 let%expect_test "L2 snapshot: best first, aggregated, truncated to n levels" =
   let b = Book.create () in
   List.iter
