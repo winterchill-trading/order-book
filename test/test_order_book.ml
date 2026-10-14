@@ -353,10 +353,10 @@ let%expect_test "l2 with zero or a negative number of levels" =
     match Order_book.l2 (Book.book b) ~n_levels with
     | bids, asks ->
       print_s
-        [%message
-          "" (n_levels : int) (bids : L2.Level.t list) (asks : L2.Level.t list)]
+        [%message "" (n_levels : int) (bids : L2.Level.t list) (asks : L2.Level.t list)]
     | exception exn -> print_s [%message "raised" (n_levels : int) (exn : exn)]);
-  [%expect {|
+  [%expect
+    {|
     ((n_levels 0) (bids ()) (asks ()))
     ((n_levels -1) (bids ()) (asks ()))
     |}]
