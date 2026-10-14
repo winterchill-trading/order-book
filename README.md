@@ -65,11 +65,11 @@ The library `order-book` exposes one module, `Order_book`:
   `Order_book.create ?stp`, applied when the next maker in priority belongs to the taker.
   Earlier fills always stand.
 
-  | `Stp.t` | Resting own order | Taker | Used by |
-  | --- | --- | --- | --- |
-  | `Cancel_taker` (default) | stays on the book | remainder cancelled, `Cancelled Self_trade` | Binance and Bybit simulators (unchanged behaviour) |
-  | `Expire_maker` | removed, listed in `Result.expired_makers` | keeps matching behind it; may fill, rest or be IOC-cancelled as usual | Hyperliquid |
-  | `Cancel_both` | removed, listed in `Result.expired_makers` | remainder cancelled, `Cancelled Self_trade` | |
+  | `Stp.t` | Resting own order | Taker |
+  | --- | --- | --- |
+  | `Cancel_taker` (default) | stays on the book | remainder cancelled, `Cancelled Self_trade` |
+  | `Expire_maker` (as on Hyperliquid) | removed, listed in `Result.expired_makers` | keeps matching behind it; may fill, rest or be IOC-cancelled as usual |
+  | `Cancel_both` | removed, listed in `Result.expired_makers` | remainder cancelled, `Cancelled Self_trade` |
 
   `Result.expired_makers` holds the removed orders in the order they were reached, so an
   engine can release their margin and report them (on Hyperliquid, `selfTradeCanceled` in
@@ -105,7 +105,7 @@ Candidates on the hot path, not yet changed. Prices, sizes and ids are already t
 | `Resting_order.t.cloid` | `Client_order_id.t option` | `or_null` | 2 words less per resting order with a client id |
 | `best_bid`, `best_ask`, `mid` results | `Price.t option` | `Price.t or_null` | done, as `best_bid_or_null`, `best_ask_or_null`, `mid_or_null` beside the option versions: 0 words |
 | `Level.t.orders` | pointer to a `Queue.t` record, which points to its array | done: the level holds the head and tail of an intrusive list of nodes | O(1) cancel (see below) |
-| `Fixed_decimal.S.t` (`Price`, `Size`) | abstract type, layout `value` | declared `immediate` | lets local values cross modes, so `exclave_` query variants become usable (see Allocation), and allows `int`-like unboxed storage |
+| `Fixed_decimal.S.t` (`Price`, `Size`) | abstract type, layout `value` | done in `fixed-decimal`: declared `immediate` | lets local values cross modes, so `exclave_` query variants become usable (see Allocation); none is added yet |
 
 `Fill.t` itself has to stay a heap record: fills are returned to the caller in a list.
 The per-call `taker` and `swept` records are already stack-allocated.
