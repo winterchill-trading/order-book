@@ -358,6 +358,6 @@ let%expect_test "l2 with zero or a negative number of levels" =
     | exception exn -> print_s [%message "raised" (n_levels : int) (exn : exn)]);
   [%expect {|
     ((n_levels 0) (bids ()) (asks ()))
-    (raised (n_levels -1) (exn (Failure Sequence.take)))
+    ((n_levels -1) (bids ()) (asks ()))
     |}]
 ;;

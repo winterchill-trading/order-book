@@ -543,6 +543,8 @@ let levels_best_first t (side : Side.t) =
 ;;
 
 let l2 t ~n_levels =
+  (* [Sequence.take] raises on a negative count; treat it like 0. *)
+  let n_levels = Int.max 0 n_levels in
   let side_l2 side =
     levels_best_first t side
     |> Fn.flip Sequence.take n_levels
