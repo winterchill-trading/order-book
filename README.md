@@ -217,10 +217,9 @@ the matching path.
 ### `or_null` queries and O(1) cancel
 
 `best_bid_or_null`, `best_ask_or_null` and `mid_or_null` return `Price.t or_null`
-(`Null` where the option versions return `None`) and allocate nothing; the first two are
-`[@@zero_alloc]` in the `.mli`. `mid_or_null` is not annotated because the checker
-cannot see through `Price.of_units` in `fixed-decimal`; `test/test_alloc.ml` pins it at
-0 words. `invariant` checks that each agrees with its option version, so every property
+(`Null` where the option versions return `None`) and allocate nothing; all three are
+`[@@zero_alloc]` in the `.mli` (`mid_or_null` since `fixed-decimal` annotates
+`Price.of_units`), and `test/test_alloc.ml` also pins them at 0 words. `invariant` checks that each agrees with its option version, so every property
 test compares them.
 
 A level is an intrusive doubly linked list of nodes (`prev`/`next` are `node or_null`, so
