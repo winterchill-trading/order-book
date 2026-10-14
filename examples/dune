@@ -1,0 +1,18 @@
+; The worked example from the Order_book module documentation. `dune test` runs it and
+; compares its output with quickstart.expected.
+
+(executable
+ (name quickstart)
+ (libraries core exchange-core order-book)
+ (preprocess
+  (pps ppx_jane)))
+
+(rule
+ (with-stdout-to
+  quickstart.output
+  (run %{exe:quickstart.exe})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff quickstart.expected quickstart.output)))

@@ -1,0 +1,6 @@
+fill 1: 1 at 101, maker order 1
+fill 2: 0.5 at 102, maker order 2
+Filled
+cancelled order 3: true
+((bids ()) (asks (((px 102) (sz 1.5) (n 1)))))
+best ask 102
