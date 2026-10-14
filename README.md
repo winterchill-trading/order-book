@@ -148,17 +148,18 @@ records), no uniqueness modes and no `Stdlib_upstream_compatible` in it.
 | `let mutable` | the loop in `Level.iter` | syntax error | rewrite with a `ref` |
 | `[@nontail]` | the last call in `iter` | unknown attribute, ignored | none needed |
 
-Erasing modes keeps the meaning of a program, so a plain OCaml 5.x build is possible with a
-source rewrite (a dune rule that strips `local_`, `exclave_`, `global_` and `@ local` and
-substitutes the compatibility module), not with a ppx: the mode keywords do not parse
-upstream. The same rewrite would be needed in both dependencies: `fixed-decimal` uses
-`let mutable`, an unboxed tuple and a `type t : immediate` layout annotation. The Jane
-Street dependencies (`core`, `ppx_jane`, and `core_bench` and `core_unix` for tests) are
-the `v0.18~preview.130.106+341` releases that exist only in the OxCaml opam repository;
-upstream `v0.17` releases lack local-mode signatures but erase the same way. No shim is
-provided: the performance work (stack-allocated matching context, unboxed `Null` links,
-checked allocation-free queries) is the reason the library uses OxCaml, and the
-`dune-project` declares the OxCaml compiler as a dependency.
+Erasing modes keeps the meaning of a program, but the mode keywords and `or_null` do not
+parse upstream, so neither attributes nor a ppx can hide them. A plain OCaml 5.x build
+would need a second, mode-free copy of `order_book.ml` and `order_book.mli` with a
+compatibility `or_null`, chosen by a dune `select` on `stdlib_upstream_compatible` (a
+library that ships only with the OxCaml compiler), and the same for both dependencies:
+`fixed-decimal` uses `let mutable`, an unboxed tuple and a `type t : immediate` layout
+annotation. The Jane Street dependencies (`core`, `ppx_jane`, and `core_bench` and
+`core_unix` for tests) are the `v0.18~preview.130.106+341` releases that exist only in the
+OxCaml opam repository; upstream stops at `v0.17`, so a port to it would come on top. No
+shim is provided: the performance work (stack-allocated matching context, unboxed `Null`
+links, checked allocation-free queries) is the reason the library uses OxCaml, and the
+opam file depends on `oxcaml`.
 
 ## Tests
 
