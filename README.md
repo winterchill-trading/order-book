@@ -13,22 +13,28 @@ specific to one venue.
 The book is pure and mutable: it does no I/O and performs no margin or account checks.
 An exchange simulator or engine drives it and settles the fills it returns.
 
-## Build
+## Install
+
+The library needs the [OxCaml](https://oxcaml.org) compiler and the Jane Street
+`v0.18~preview` packages from the OxCaml opam repository. Its two dependencies,
+`fixed-decimal` and `exchange-core`, are not on opam yet, so pin them from GitHub:
 
 ```sh
 opam switch create 5.2.0+ox --repos ox=git+https://github.com/oxcaml/opam-repository.git,default
 opam pin add fixed-decimal https://github.com/winterchill-trading/fixed-decimal.git --no-action
 opam pin add exchange-core https://github.com/winterchill-trading/exchange-core.git --no-action
+opam pin add order-book https://github.com/winterchill-trading/order-book.git
+```
+
+From a checkout:
+
+```sh
 opam install . --deps-only --with-test
 dune build && dune test
 ```
 
 Inside a dune workspace that also contains `exchange-core` and `fixed-decimal`, dune uses
 the sibling sources and the pins are not needed.
-
-CI installs the pinned siblings and the opam dependencies through the shared
-[ox-setup](https://github.com/winterchill-trading/infra/blob/main/docs/ci.md) action, which
-caches the built opam switch between runs.
 
 ## API
 
