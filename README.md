@@ -110,6 +110,35 @@ Candidates on the hot path, not yet changed. Prices, sizes and ids are already t
 `Fill.t` itself has to stay a heap record: fills are returned to the caller in a list.
 The per-call `taker` and `swept` records are already stack-allocated.
 
+## Portability
+
+The library builds only with the OxCaml compiler (`ocaml-variants.5.2.0+ox`). It uses
+these OxCaml-only constructs; there are no unboxed types (`float#`, unboxed tuples or
+records), no uniqueness modes and no `Stdlib_upstream_compatible` in it.
+
+| Construct | Where | Upstream OCaml 5.x | Shim |
+| --- | --- | --- | --- |
+| `'a or_null` with `Null` / `This` (a predefined type) | `best_bid_or_null`, `best_ask_or_null`, `mid_or_null` in the `.mli`; the `prev`/`next`/`head`/`tail` links of a level | no such type | `type 'a or_null = Null \| This of 'a` in a compatibility module keeps the source unchanged, but `This` then allocates two words and the queries are no longer allocation free |
+| `[@@zero_alloc]` | the three `_or_null` queries in the `.mli` | unknown attribute, ignored | none needed; the guarantee is simply not checked |
+| `local_` bindings and parameters | `execute` builds the taker context with `let local_`; `sweep` takes it `local_` | syntax error | erase the keyword; the record moves to the heap |
+| `exclave_` | every return of `sweep` | syntax error | erase the keyword |
+| `global_` record fields | the private `taker` and `swept` records | syntax error | erase the keyword |
+| `@ local` mode annotations | `iter ~f` in the `.mli`; `Level.iter` and `iter` in the `.ml` | syntax error | erase the annotation; callers' closures then go on the heap |
+| `let mutable` | the loop in `Level.iter` | syntax error | rewrite with a `ref` |
+| `[@nontail]` | the last call in `iter` | unknown attribute, ignored | none needed |
+
+Erasing modes keeps the meaning of a program, so a plain OCaml 5.x build is possible with a
+source rewrite (a dune rule that strips `local_`, `exclave_`, `global_` and `@ local` and
+substitutes the compatibility module), not with a ppx: the mode keywords do not parse
+upstream. The same rewrite would be needed in both dependencies: `fixed-decimal` uses
+`let mutable`, an unboxed tuple and a `type t : immediate` layout annotation. The Jane
+Street dependencies (`core`, `ppx_jane`, and `core_bench` and `core_unix` for tests) are
+the `v0.18~preview.130.106+341` releases that exist only in the OxCaml opam repository;
+upstream `v0.17` releases lack local-mode signatures but erase the same way. No shim is
+provided: the performance work (stack-allocated matching context, unboxed `Null` links,
+checked allocation-free queries) is the reason the library uses OxCaml, and the
+`dune-project` declares the OxCaml compiler as a dependency.
+
 ## Tests
 
 `dune test` runs expect tests (priority, partial fills, TIF semantics, self-trade,
