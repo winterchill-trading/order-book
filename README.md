@@ -344,6 +344,8 @@ released first:
 
 The version comes from the git tag through `dune subst`; it is written nowhere else.
 
+API docs are built with `dune build @doc` (odoc). CI fails on any odoc warning, so run it before tagging.
+
 ## Used by
 
 In the same organization: `exchange-core-engine`, `price-anchor` and the exchange
