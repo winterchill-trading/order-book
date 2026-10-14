@@ -140,9 +140,7 @@ val mid : t -> Price.t option
 val best_bid_or_null : t -> Price.t or_null [@@zero_alloc]
 val best_ask_or_null : t -> Price.t or_null [@@zero_alloc]
 
-(** Not annotated [@@zero_alloc]: the check cannot see through [Price.of_units] in
-    [fixed-decimal]; [test/test_alloc.ml] pins it at 0 words. *)
-val mid_or_null : t -> Price.t or_null
+val mid_or_null : t -> Price.t or_null [@@zero_alloc]
 
 (** Aggregated levels, best first, at most [n_levels] per side: [(bids, asks)]. *)
 val l2 : t -> n_levels:int -> L2.Level.t list * L2.Level.t list
