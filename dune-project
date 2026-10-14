@@ -27,23 +27,30 @@
  (tags
   (order-book matching-engine exchange trading oxcaml))
  (depends
-  (ocaml-variants
+  oxcaml
+  (ocaml
    (and
-    (>= 5.2.0+ox)
-    (< 5.2.1~)))
+    (>= 5.2.0)
+    (< 5.3~)))
   dune
   (core
-   (>= v0.18~preview.130.106+341))
+   (and
+    (>= v0.18~preview.130.106+341)
+    (< v0.19~)))
   (ppx_jane
-   (>= v0.18~preview.130.106+341))
+   (and
+    (>= v0.18~preview.130.106+341)
+    (< v0.19~)))
   fixed-decimal
   exchange-core
   (core_bench
    (and
     :with-test
-    (>= v0.18~preview.130.106+341)))
+    (>= v0.18~preview.130.106+341)
+    (< v0.19~)))
   (core_unix
    (and
     :with-test
-    (>= v0.18~preview.130.106+341)))
+    (>= v0.18~preview.130.106+341)
+    (< v0.19~)))
   (odoc :with-doc)))

@@ -11,14 +11,15 @@ homepage: "https://github.com/winterchill-trading/order-book"
 doc: "https://github.com/winterchill-trading/order-book#readme"
 bug-reports: "https://github.com/winterchill-trading/order-book/issues"
 depends: [
-  "ocaml-variants" {>= "5.2.0+ox" & < "5.2.1~"}
+  "oxcaml"
+  "ocaml" {>= "5.2.0" & < "5.3~"}
   "dune" {>= "3.17"}
-  "core" {>= "v0.18~preview.130.106+341"}
-  "ppx_jane" {>= "v0.18~preview.130.106+341"}
+  "core" {>= "v0.18~preview.130.106+341" & < "v0.19~"}
+  "ppx_jane" {>= "v0.18~preview.130.106+341" & < "v0.19~"}
   "fixed-decimal"
   "exchange-core"
-  "core_bench" {with-test & >= "v0.18~preview.130.106+341"}
-  "core_unix" {with-test & >= "v0.18~preview.130.106+341"}
+  "core_bench" {with-test & >= "v0.18~preview.130.106+341" & < "v0.19~"}
+  "core_unix" {with-test & >= "v0.18~preview.130.106+341" & < "v0.19~"}
   "odoc" {with-doc}
 ]
 build: [
@@ -36,3 +37,4 @@ build: [
   ]
 ]
 dev-repo: "git+https://github.com/winterchill-trading/order-book.git"
+x-maintenance-intent: ["(latest)"]
