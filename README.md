@@ -126,7 +126,8 @@ result and full L2. A second property decodes random byte strings into operation
 the touch, market orders on an empty book or beyond the slippage limit, cancelling a
 filled order, FIFO after a partial fill, consecutive own makers) are pinned with
 `~examples`, so they run on every test run. The reference matcher implements each
-self-trade policy independently, and both properties run under all three policies. `test/test_alloc.ml` prints minor words per operation.
+self-trade policy independently, and both properties run under all three policies.
+`test/test_alloc.ml` prints minor words per operation.
 
 ## Benchmarks
 
@@ -225,8 +226,8 @@ the matching path.
 `best_bid_or_null`, `best_ask_or_null` and `mid_or_null` return `Price.t or_null`
 (`Null` where the option versions return `None`) and allocate nothing; all three are
 `[@@zero_alloc]` in the `.mli` (`mid_or_null` since `fixed-decimal` annotates
-`Price.of_units`), and `test/test_alloc.ml` also pins them at 0 words. `invariant` checks that each agrees with its option version, so every property
-test compares them.
+`Price.of_units`), and `test/test_alloc.ml` also pins them at 0 words. `invariant`
+checks that each agrees with its option version, so every property test compares them.
 
 A level is an intrusive doubly linked list of nodes (`prev`/`next` are `node or_null`, so
 an end of the list is an immediate rather than a `Some` box), and the order index maps
@@ -252,4 +253,3 @@ after in every dev, release and `-O3` run. The other cases measured within noise
 earlier tables: the machine was shared with heavy parallel builds during the run, so
 sub-microsecond timings from it are not reported. CI runs on amd64; these numbers are
 arm64.
-
