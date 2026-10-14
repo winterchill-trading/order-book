@@ -307,3 +307,17 @@ open:
 
 Two former gaps are closed: `mid_or_null` is now checked with `[@@zero_alloc]`, and `l2`
 no longer raises on a negative level count.
+
+## Releasing
+
+Nothing is published yet. The planned flow, once `fixed-decimal` and `exchange-core` are
+released first:
+
+1. Move the `## Unreleased` entries in `CHANGES.md` under a new version heading.
+2. Run `dune-release tag` to tag `v<version>`, then `dune-release distrib` and
+   `dune-release publish distrib` to build the tarball and attach it to a GitHub release.
+3. Run `dune-release opam pkg` and `dune-release opam submit` to open a pull request
+   against the opam repository that serves OxCaml packages (the library cannot build
+   against the default repository's compiler).
+
+The version comes from the git tag through `dune subst`; it is written nowhere else.
