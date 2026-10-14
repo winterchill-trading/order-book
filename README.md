@@ -321,3 +321,8 @@ released first:
    against the default repository's compiler).
 
 The version comes from the git tag through `dune subst`; it is written nowhere else.
+
+## Used by
+
+In the same organization: `exchange-core-engine`, `price-anchor` and the exchange
+simulators built on them.
