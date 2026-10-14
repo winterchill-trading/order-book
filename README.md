@@ -36,6 +36,27 @@ dune build && dune test
 Inside a dune workspace that also contains `exchange-core` and `fixed-decimal`, dune uses
 the sibling sources and the pins are not needed.
 
+## Quick start
+
+[`examples/quickstart.ml`](examples/quickstart.ml) builds a two-sided book, sends one
+crossing order, cancels a bid and prints an L2 snapshot. `dune test` runs it and compares
+its output with [`examples/quickstart.expected`](examples/quickstart.expected):
+
+```sh
+dune exec examples/quickstart.exe
+```
+
+The core of it:
+
+```ocaml
+let book = Order_book.create (Symbol.of_string "BTC") in
+let result =
+  Order_book.add_limit book ~oid:(Order_id.of_int 4) ~owner:taker ~side:Buy
+    ~px:(Price.of_string "102") ~sz:(Size.of_string "1.5") ~tif:Gtc ~time:4 ~next_tid ()
+in
+List.iter result.fills ~f:(fun (fill : Order_book.Fill.t) -> ...)
+```
+
 ## API
 
 The library `order-book` exposes one module, `Order_book`:
