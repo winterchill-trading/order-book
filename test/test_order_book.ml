@@ -344,3 +344,20 @@ let%test_unit "a single taker sweeps 200k makers" =
   [%test_result: int] (List.length r.fills) ~expect:n;
   assert (Order_book.is_empty book)
 ;;
+
+let%expect_test "l2 with zero or a negative number of levels" =
+  let b = Book.create () in
+  ignore (Book.limit ~quiet:true b ~owner:1 Buy "99" "1");
+  ignore (Book.limit ~quiet:true b ~owner:2 Sell "101" "1");
+  List.iter [ 0; -1 ] ~f:(fun n_levels ->
+    match Order_book.l2 (Book.book b) ~n_levels with
+    | bids, asks ->
+      print_s
+        [%message
+          "" (n_levels : int) (bids : L2.Level.t list) (asks : L2.Level.t list)]
+    | exception exn -> print_s [%message "raised" (n_levels : int) (exn : exn)]);
+  [%expect {|
+    ((n_levels 0) (bids ()) (asks ()))
+    (raised (n_levels -1) (exn (Failure Sequence.take)))
+    |}]
+;;
