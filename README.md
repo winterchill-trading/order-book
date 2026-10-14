@@ -282,3 +282,28 @@ after in every dev, release and `-O3` run. The other cases measured within noise
 earlier tables: the machine was shared with heavy parallel builds during the run, so
 sub-microsecond timings from it are not reported. CI runs on amd64; these numbers are
 arm64.
+
+## Known gaps
+
+Each of these needs a design decision or belongs to the caller, so the library leaves it
+open:
+
+- **One instrument per book.** A caller with several instruments keeps one book each; the
+  book has no cross-instrument state to share.
+- **No amend.** Changing an order's price or size is cancel and resubmit. Venues differ on
+  which amendments keep time priority (most keep it for a size decrease only), so an
+  `amend` needs a policy like `Stp.t` first.
+- **`reduce_only` is stored, not enforced.** Enforcing it needs the account's position,
+  which the book does not know; the caller checks it before submitting.
+- **No fill-or-kill, stop or iceberg orders.** Time in force is `Exchange_core.Tif.t`
+  (`Gtc`, `Ioc`, `Alo`); fill-or-kill needs a new constructor there. Stop orders need a
+  trigger price source, which is the caller's.
+- **Invalid input raises.** `add_limit` and `market` raise (documented in the `.mli`) on a
+  non-positive size or price or a duplicate order id, because callers validate before
+  submitting. An `Or_error` variant would be an addition; whether to add it is open.
+- **Client order ids are boxed.** `Fill.t` and `Resting_order.t` carry
+  `Client_order_id.t option`; switching to `or_null` saves two words per fill but changes
+  public record types.
+
+Two former gaps are closed: `mid_or_null` is now checked with `[@@zero_alloc]`, and `l2`
+no longer raises on a negative level count.
